@@ -129,19 +129,3 @@ All 21 tests pass successfully.
 - **Week 6**: Scaling to larger boards
 - **Week 7**: Demo & documentation
 
-## 🛠️ Technologies
-
-- **Python 3.8+**: Core language
-- **NumPy**: Board representation and computation
-- **PyTorch**: Neural network (upcoming)
-- **TensorBoard**: Training visualization (upcoming)
-
-## 📝 License
-
-This is an educational project for EE542.
-
-## 👤 Author
-
-Nitzan Saar
-
-# tictactoe_MCTS_player
