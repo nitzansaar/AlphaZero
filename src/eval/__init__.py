@@ -1,5 +1,5 @@
 """Evaluation module."""
 
-from .agents import RandomAgent, HumanAgent
+from .agents import NNAgent, HumanAgent
 
-__all__ = ['RandomAgent', 'HumanAgent']
+__all__ = ['NNAgent', 'HumanAgent']

@@ -4,14 +4,14 @@ Command-line interface for playing N×N K-in-a-row.
 
 Supports:
 - Human vs Human
-- Human vs Random AI
-- Random vs Random (for testing)
+- Human vs NN policy
+- NN vs NN (for testing)
 """
 
 import argparse
 import sys
 from src.env.game_env import GameEnv
-from src.eval.agents import RandomAgent, HumanAgent
+from src.eval.agents import NNAgent, HumanAgent
 
 
 def play_game(n: int, k: int, player1_type: str, player2_type: str):
@@ -27,17 +27,24 @@ def play_game(n: int, k: int, player1_type: str, player2_type: str):
     # Create environment
     env = GameEnv(n, k)
     
-    # Create agents
+    # Create agents (only 'human' or 'nn')
+    p1 = player1_type
+    p2 = player2_type
+
     agents = {}
-    if player1_type == 'human':
+    if p1 == 'human':
         agents[1] = HumanAgent("Player 1 (X)")
+    elif p1 == 'nn':
+        agents[1] = NNAgent("NN 1 (X)")
     else:
-        agents[1] = RandomAgent("Random 1 (X)")
-    
-    if player2_type == 'human':
+        raise ValueError(f"Unknown player1 type: {player1_type}")
+
+    if p2 == 'human':
         agents[-1] = HumanAgent("Player 2 (O)")
+    elif p2 == 'nn':
+        agents[-1] = NNAgent("NN 2 (O)")
     else:
-        agents[-1] = RandomAgent("Random 2 (O)")
+        raise ValueError(f"Unknown player2 type: {player2_type}")
     
     # Game loop
     print(f"\n{'='*40}")
@@ -103,14 +110,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # 3×3 Tic-Tac-Toe, human vs random
+  # 3×3 Tic-Tac-Toe, human vs NN policy
   python play_cli.py
   
   # 5×5 with 4-in-a-row, human vs human
   python play_cli.py -n 5 -k 4 -p1 human -p2 human
   
-  # Random vs Random (for testing)
-  python play_cli.py -p1 random -p2 random
+  # NN vs NN (for testing)
+  python play_cli.py -p1 nn -p2 nn
         """
     )
     
@@ -131,17 +138,17 @@ Examples:
     parser.add_argument(
         '-p1', '--player1',
         type=str,
-        choices=['human', 'random'],
+        choices=['human', 'nn'],
         default='human',
-        help='Player 1 type (default: human)'
+        help="Player 1 type: 'human' or 'nn'"
     )
     
     parser.add_argument(
         '-p2', '--player2',
         type=str,
-        choices=['human', 'random'],
-        default='random',
-        help='Player 2 type (default: random)'
+        choices=['human', 'nn'],
+        default='nn',
+        help="Player 2 type (default: nn)"
     )
     
     args = parser.parse_args()
