@@ -28,10 +28,13 @@ class RandomAgent:
         Returns:
             (row, col) tuple of selected move
         """
+        # just pick a random move from the legal moves
         legal_moves = env.get_legal_moves()
         if not legal_moves:
             raise ValueError("No legal moves available")
         
+
+        # instead of random choice, use the policy network to get the move
         return random.choice(legal_moves)
 
 

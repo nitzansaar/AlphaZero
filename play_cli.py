@@ -10,11 +10,6 @@ Supports:
 
 import argparse
 import sys
-from pathlib import Path
-
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent))
-
 from src.env.game_env import GameEnv
 from src.eval.agents import RandomAgent, HumanAgent
 
@@ -85,9 +80,9 @@ def play_game(n: int, k: int, player1_type: str, player2_type: str):
                 if env.winner is not None:
                     winner_symbol = 'X' if env.winner == 1 else 'O'
                     winner_name = agents[env.winner].name
-                    print(f"\n🎉 {winner_name} ({winner_symbol}) wins!")
+                    print(f"\n{winner_name} ({winner_symbol}) wins!")
                 else:
-                    print(f"\n🤝 It's a draw!")
+                    print(f"\nIt's a draw!")
                 
                 print(f"\nTotal moves: {move_count}")
                 print(f"{'='*40}\n")

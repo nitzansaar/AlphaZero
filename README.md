@@ -2,14 +2,14 @@
 
 A general N×N K-in-a-row game agent that learns to play optimally via self-play, guided by a policy/value neural network and Monte Carlo Tree Search (MCTS).
 
-## 🎯 Project Overview
+## Project Overview
 
 This project implements an AlphaZero-inspired reinforcement learning agent that can:
 - Play generalized tic-tac-toe on any N×N board
 - Learn optimal strategies through self-play
 - Scale from 3×3 standard tic-tac-toe to larger boards like 5×5 with K=4
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 tictactoeMCTS/
@@ -20,13 +20,11 @@ tictactoeMCTS/
 │   ├── trainer/      # Training pipeline
 │   └── eval/         # Evaluation and agents
 ├── tests/            # Unit tests
-├── notebooks/        # Jupyter notebooks for analysis
-├── data/            # Training data and models
 ├── play_cli.py      # Command-line game interface
 └── requirements.txt # Python dependencies
 ```
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Installation
 
@@ -63,18 +61,18 @@ python -m unittest discover tests/
 pytest tests/ --cov=src --cov-report=html
 ```
 
-## 📚 Week 1 Milestone (Completed) ✅
+##  Week 1 Milestone (Completed)
 
-- ✅ Implemented generalized `GameEnv` class for N×N K-in-a-row
-- ✅ Board representation using NumPy arrays
-- ✅ Win detection (horizontal, vertical, diagonal, anti-diagonal)
-- ✅ Draw detection and edge cases
-- ✅ Board encoding for neural network input (one-hot planes)
-- ✅ Comprehensive unit tests (21 tests, all passing)
-- ✅ CLI for human vs random gameplay
-- ✅ Project structure and dependencies setup
+- Implemented generalized `GameEnv` class for N×N K-in-a-row
+- Board representation using NumPy arrays
+- Win detection (horizontal, vertical, diagonal, anti-diagonal)
+- Draw detection and edge cases
+- Board encoding for neural network input (one-hot planes)
+- Comprehensive unit tests (21 tests, all passing)
+- CLI for human vs random gameplay
+- Project structure and dependencies setup
 
-## 🎮 Game Environment Features
+## Game Environment Features
 
 The `GameEnv` class supports:
 
@@ -108,7 +106,7 @@ legal_moves = env.get_legal_moves()  # List of (row, col) tuples
 print(env.render())
 ```
 
-## 🧪 Testing
+## Testing
 
 The test suite covers:
 - Basic game mechanics (initialization, reset, move validation)
@@ -118,9 +116,8 @@ The test suite covers:
 - Board encoding correctness
 - Game state cloning
 
-All 21 tests pass successfully.
 
-## 📋 Next Steps (Upcoming Weeks)
+## Next Steps (Upcoming Weeks)
 
 - **Week 2**: Neural network architecture & supervised learning
 - **Week 3**: MCTS implementation
