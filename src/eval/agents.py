@@ -6,6 +6,7 @@ import os
 from typing import Tuple, List
 
 import torch
+import torch.nn.functional as F
 
 try:
     # Use the exact model architecture defined in the trainer
@@ -63,7 +64,15 @@ class NNAgent:
             idx = r * env.n + c
             mask[idx] = 0.0
         masked_logits = logits + mask
-        best_idx = int(torch.argmax(masked_logits).item())
+        # Softmax over masked logits to get probabilities on legal moves only
+        probs = F.softmax(masked_logits, dim=-1)
+        # Collect and print probabilities for legal moves
+        dist = [((i // env.n, i % env.n), float(probs[i])) for i in range(9) if mask[i] == 0.0]
+        dist.sort(key=lambda x: x[1], reverse=True)
+        print("NN move probabilities:")
+        for (r, c), p in dist:
+            print(f"  ({r}, {c}): {p:.3f}")
+        best_idx = int(torch.argmax(probs).item())
         return best_idx // env.n, best_idx % env.n
     
     def get_move(self, env) -> Tuple[int, int]:
