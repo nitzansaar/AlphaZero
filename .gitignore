@@ -23,8 +23,8 @@ MANIFEST
 
 # Virtual environments
 venv/
-env/
-ENV/
+/env/
+/ENV/
 .venv/
 
 # PyCharm

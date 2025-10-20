@@ -47,14 +47,39 @@ class NNAgent:
             # Leave model as None to gracefully fall back to random
             self._model = None
     
+    def _board_to_canonical_3d(self, env) -> torch.Tensor:
+        """
+        Convert board to canonical 3-plane representation.
+
+        Returns tensor of shape (1, 3, 3, 3) for batched conv2d input:
+        - Plane 0: Current player positions (1s)
+        - Plane 1: Opponent positions (1s)
+        - Plane 2: Empty positions (1s)
+        """
+        import numpy as np
+        board = env.board  # shape (3, 3), values in {-1, 0, 1}
+        current_player = env.current_player  # 1 or -1
+
+        # Convert to canonical view (current player = +1, opponent = -1)
+        canonical = board * current_player
+
+        # Create 3-plane representation
+        planes = np.zeros((3, 3, 3), dtype=np.float32)
+        planes[0] = (canonical == 1).astype(np.float32)   # current player
+        planes[1] = (canonical == -1).astype(np.float32)  # opponent
+        planes[2] = (canonical == 0).astype(np.float32)   # empty
+
+        # Convert to torch and add batch dimension: (3, 3, 3) -> (1, 3, 3, 3)
+        return torch.from_numpy(planes).unsqueeze(0).to(self._device)
+
     def _nn_select_move(self, env) -> Tuple[int, int]:
         """Select move via NN logits masked by legality (3x3 only)."""
         if env.n != 3:
             raise RuntimeError("NN policy only supports 3x3 boards.")
-        # Flatten board values (-1, 0, 1) to length-9 float32 tensor
-        board_flat = torch.tensor(env.board.reshape(-1), dtype=torch.float32, device=self._device)
+        # Convert board to canonical 3-plane representation
+        board_3d = self._board_to_canonical_3d(env)  # shape (1, 3, 3, 3)
         with torch.no_grad():
-            logits = self._model(board_flat)  # shape (9,)
+            logits = self._model(board_3d).squeeze(0)  # shape (9,)
         # Mask illegal moves
         legal_moves = env.get_legal_moves()
         if not legal_moves:
