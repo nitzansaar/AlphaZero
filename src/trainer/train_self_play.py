@@ -312,19 +312,21 @@ class MCTS:
 class SelfPlayGame:
     """Manages a single self-play game using MCTS for move selection."""
 
-    def __init__(self, model: nn.Module, device: str, num_simulations: int = 50, temperature: float = 1.0):
+    def __init__(self, model: nn.Module, device: str, num_simulations: int = 50, temperature: float = 1.0, verbose: bool = False):
         """
         Args:
             model: Neural network model (policy + value)
             device: 'cpu' or 'cuda'
             num_simulations: Number of MCTS simulations per move
             temperature: Temperature for move selection (1.0 = stochastic, 0 = greedy)
+            verbose: Enable detailed logging during self-play
         """
         self.model = model
         self.device = device
         self.mcts = MCTS(model, device, num_simulations=num_simulations)
         self.temperature = temperature
         self.game_history = []  # List of (state, mcts_policy, player) tuples
+        self.verbose = verbose
 
     def play_game(self) -> Tuple[int, List]:
         """
@@ -341,10 +343,22 @@ class SelfPlayGame:
 
         move_count = 0
 
+        if self.verbose:
+            print(f"\n{'='*60}")
+            print("SELF-PLAY GAME START")
+            print(f"{'='*60}")
+
         while True:
             # Check if game is over
             winner = check_winner(board)
             if winner is not None:
+                if self.verbose:
+                    result_str = "Player 1 (X) wins" if winner == 1 else "Player -1 (O) wins" if winner == -1 else "Draw"
+                    print(f"\n{'='*60}")
+                    print(f"GAME OVER: {result_str}")
+                    print(f"Total moves: {move_count}")
+                    print(f"Training samples generated: {len(self.game_history)}")
+                    print(f"{'='*60}\n")
                 return winner, self.game_history
 
             # Get canonical state (current player's perspective)
@@ -353,6 +367,11 @@ class SelfPlayGame:
             # Use temperature decay: high temp early, low temp later
             # This encourages exploration early, exploitation later
             temp = self.temperature if move_count < 10 else 0.1
+
+            if self.verbose:
+                print(f"\n--- Move {move_count + 1} ---")
+                print(f"Current player: {current_player} ({'X' if current_player == 1 else 'O'})")
+                print(f"Temperature: {temp:.2f}")
 
             # Get MCTS policy with Dirichlet noise to encourage exploration
             mcts_policy, _ = self.mcts.get_action_probs(
@@ -363,11 +382,27 @@ class SelfPlayGame:
                 noise_epsilon=0.25
             )
 
+            if self.verbose:
+                # Show MCTS probability distribution
+                print("\nMCTS Probability Distribution (training target):")
+                top_moves = sorted(enumerate(mcts_policy), key=lambda x: x[1], reverse=True)[:5]
+                for idx, prob in top_moves:
+                    if prob > 0.01:
+                        row, col = idx // 3, idx % 3
+                        print(f"  Move ({row},{col}): {prob:.3f}")
+
             # Sample move from MCTS policy
             move = np.random.choice(9, p=mcts_policy)
 
+            if self.verbose:
+                move_row, move_col = move // 3, move % 3
+                print(f"\nSampled move from distribution: ({move_row},{move_col})")
+
             # Record state and MCTS-improved policy
             self.game_history.append((canonical_state, mcts_policy, current_player))
+
+            if self.verbose:
+                print(f"Stored training sample: (board_state, mcts_policy, player={current_player})")
 
             # Make move
             board[move] = current_player
@@ -410,7 +445,7 @@ class ReplayBuffer:
 def train_self_play(model: nn.Module, episodes: int = 1000,
                    batch_size: int = 64, lr: float = 0.001,
                    device: str = 'cpu', num_simulations: int = 50,
-                   temperature: float = 1.0):
+                   temperature: float = 1.0, verbose_episodes: int = 0):
     """
     Train the neural network using AlphaZero-style self-play with MCTS.
 
@@ -422,6 +457,7 @@ def train_self_play(model: nn.Module, episodes: int = 1000,
         device: 'cpu' or 'cuda'
         num_simulations: Number of MCTS simulations per move
         temperature: Temperature for move selection
+        verbose_episodes: Number of initial episodes to log in detail (0 = none)
     """
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
@@ -457,13 +493,30 @@ def train_self_play(model: nn.Module, episodes: int = 1000,
     print("-" * 60)
 
     for episode in range(episodes):
+        verbose = episode < verbose_episodes
+
+        if verbose:
+            print(f"\n{'#'*70}")
+            print(f"EPISODE {episode + 1}/{episodes}")
+            print(f"{'#'*70}")
+
         # Play self-play game with MCTS
         model.eval()  # Set to eval mode during self-play
-        game_engine = SelfPlayGame(model, device, num_simulations=num_simulations, temperature=temperature)
+
+        if verbose:
+            print("\n[1/3] SELF-PLAY: Generating game with MCTS...")
+
+        game_engine = SelfPlayGame(model, device, num_simulations=num_simulations,
+                                   temperature=temperature, verbose=verbose)
         game_result, game_history = game_engine.play_game()
 
         # Add to replay buffer
         replay_buffer.add_game(game_result, game_history)
+
+        if verbose:
+            print(f"\n[2/3] REPLAY BUFFER:")
+            print(f"  Game samples added: {len(game_history)}")
+            print(f"  Total buffer size: {len(replay_buffer)}")
 
         # Track statistics
         if game_result == 1:
@@ -480,7 +533,12 @@ def train_self_play(model: nn.Module, episodes: int = 1000,
             # Perform multiple training steps per game for better sample efficiency
             num_train_steps = max(1, len(game_history) // 2)
 
-            for _ in range(num_train_steps):
+            if verbose:
+                print(f"\n[3/3] TRAINING:")
+                print(f"  Training steps: {num_train_steps}")
+                print(f"  Batch size: {batch_size}")
+
+            for train_step in range(num_train_steps):
                 batch = replay_buffer.sample(batch_size)
 
                 # Prepare batch tensors
@@ -488,9 +546,23 @@ def train_self_play(model: nn.Module, episodes: int = 1000,
                 target_policies = torch.tensor([p for _, p, _ in batch], dtype=torch.float32).to(device)
                 target_values = torch.tensor([v for _, _, v in batch], dtype=torch.float32).unsqueeze(1).to(device)
 
+                if verbose and train_step == 0:
+                    print(f"\n  Batch {train_step + 1}/{num_train_steps}:")
+                    print(f"    States shape: {states.shape}")
+                    print(f"    Target policies shape: {target_policies.shape}")
+                    print(f"    Target values shape: {target_values.shape}")
+                    print(f"    Sample target policy (first example): {target_policies[0].cpu().numpy()}")
+                    print(f"    Sample target value (first example): {target_values[0].item():.3f}")
+
                 # Forward pass
                 optimizer.zero_grad()
                 policy_logits, values = model(states)
+
+                if verbose and train_step == 0:
+                    print(f"\n    Model predictions (first example):")
+                    pred_policy = torch.softmax(policy_logits[0], dim=0).detach().cpu().numpy()
+                    print(f"      Predicted policy: {pred_policy}")
+                    print(f"      Predicted value: {values[0].item():.3f}")
 
                 # Policy loss: cross-entropy between MCTS policy and NN policy
                 log_probs = torch.log_softmax(policy_logits, dim=1)
@@ -502,6 +574,12 @@ def train_self_play(model: nn.Module, episodes: int = 1000,
                 # Combined loss
                 total_loss = policy_loss + value_loss
 
+                if verbose and train_step == 0:
+                    print(f"\n    Loss values:")
+                    print(f"      Policy loss (cross-entropy): {policy_loss.item():.4f}")
+                    print(f"      Value loss (MSE): {value_loss.item():.4f}")
+                    print(f"      Total loss: {total_loss.item():.4f}")
+
                 # Backward pass
                 total_loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -511,8 +589,16 @@ def train_self_play(model: nn.Module, episodes: int = 1000,
                 stats['avg_value_loss'].append(value_loss.item())
                 stats['avg_total_loss'].append(total_loss.item())
 
+        elif verbose:
+            print(f"\n[3/3] TRAINING: Skipped (buffer size {len(replay_buffer)} < batch size {batch_size})")
+
         # Step learning rate scheduler
         scheduler.step()
+
+        if verbose:
+            print(f"\n{'#'*70}")
+            print(f"EPISODE {episode + 1} COMPLETE")
+            print(f"{'#'*70}\n")
 
         # Print progress and record history
         if (episode + 1) % 100 == 0:
@@ -695,7 +781,8 @@ if __name__ == "__main__":
         lr=0.001,
         device=device,
         num_simulations=50,      # MCTS simulations per move during training
-        temperature=1.0          # Exploration temperature
+        temperature=1.0,         # Exploration temperature
+        verbose_episodes=2       # Log first 2 episodes in detail
     )
 
     # Visualize training progress
