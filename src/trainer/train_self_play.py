@@ -131,16 +131,19 @@ class MCTSNode:
             return 0.0
         return self.total_value / self.visit_count
 
-    def select_child(self, c_puct: float = 1.0) -> int:
+    def select_child(self, c_puct: float = 2.0) -> int:
         """Select child with highest UCB score."""
         best_score = -float('inf')
         best_action = -1
 
-        # Use (N(s) + 1) to avoid sqrt(0) on first visit
-        parent_visits = self.visit_count + 1
+        # Parent visit count for exploration term
+        # Add epsilon to avoid division by zero on first visit
+        parent_visits = max(1, self.visit_count)
 
         for action, child in self.children.items():
             # UCB formula: Q(s,a) + c_puct * P(s,a) * sqrt(N(s)) / (1 + N(s,a))
+            # Q(s,a) is the average value (exploitation)
+            # The second term is the exploration bonus (higher for unvisited nodes)
             q_value = child.value()
             u_value = c_puct * child.prior_prob * np.sqrt(parent_visits) / (1 + child.visit_count)
             score = q_value + u_value
@@ -155,13 +158,13 @@ class MCTSNode:
 class MCTS:
     """Monte Carlo Tree Search with neural network guidance."""
 
-    def __init__(self, model: nn.Module, device: str, num_simulations: int = 50, c_puct: float = 1.0, debug: bool = False):
+    def __init__(self, model: nn.Module, device: str, num_simulations: int = 50, c_puct: float = 2.0, debug: bool = False):
         """
         Args:
             model: Neural network (policy + value)
             device: 'cpu' or 'cuda'
             num_simulations: Number of MCTS simulations per move
-            c_puct: Exploration constant
+            c_puct: Exploration constant (higher = more exploration, typical: 1-5)
             debug: Enable debug output
         """
         self.model = model
@@ -170,7 +173,8 @@ class MCTS:
         self.c_puct = c_puct
         self.debug = debug
 
-    def get_action_probs(self, board: List[int], player: int, temperature: float = 1.0) -> Tuple[List[float], List[int]]:
+    def get_action_probs(self, board: List[int], player: int, temperature: float = 1.0,
+                         add_noise: bool = False, dirichlet_alpha: float = 0.3, noise_epsilon: float = 0.25) -> Tuple[List[float], List[int]]:
         """
         Run MCTS simulations and return action probabilities.
 
@@ -178,6 +182,9 @@ class MCTS:
             board: Current board state
             player: Current player
             temperature: Temperature for exploration (higher = more random)
+            add_noise: Whether to add Dirichlet noise to priors for exploration
+            dirichlet_alpha: Alpha parameter for Dirichlet distribution (lower = more uniform)
+            noise_epsilon: Weight of noise vs network prior (0.25 = 25% noise, 75% prior)
 
         Returns:
             (probabilities, valid_moves) where probabilities[i] is prob of move i
@@ -197,9 +204,20 @@ class MCTS:
         policy = np.exp(policy_logits - np.max(policy_logits))
         policy_sum = sum(policy[m] for m in valid_moves)
 
+        # Normalize policy for valid moves only
+        policy_probs = np.zeros(9)
         for move in valid_moves:
-            prior_prob = policy[move] / policy_sum if policy_sum > 0 else 1.0 / len(valid_moves)
-            root.children[move] = MCTSNode(prior_prob=prior_prob)
+            policy_probs[move] = policy[move] / policy_sum if policy_sum > 0 else 1.0 / len(valid_moves)
+
+        # Add Dirichlet noise to encourage exploration (AlphaZero technique)
+        if add_noise and len(valid_moves) > 1:
+            noise = np.random.dirichlet([dirichlet_alpha] * len(valid_moves))
+            for i, move in enumerate(valid_moves):
+                policy_probs[move] = (1 - noise_epsilon) * policy_probs[move] + noise_epsilon * noise[i]
+
+        # Create child nodes with final priors
+        for move in valid_moves:
+            root.children[move] = MCTSNode(prior_prob=policy_probs[move])
 
         # Run simulations
         for _ in range(self.num_simulations):
@@ -336,8 +354,14 @@ class SelfPlayGame:
             # This encourages exploration early, exploitation later
             temp = self.temperature if move_count < 10 else 0.1
 
-            # Get MCTS policy
-            mcts_policy, _ = self.mcts.get_action_probs(board, current_player, temperature=temp)
+            # Get MCTS policy with Dirichlet noise to encourage exploration
+            mcts_policy, _ = self.mcts.get_action_probs(
+                board, current_player,
+                temperature=temp,
+                add_noise=True,  # Add noise during self-play for exploration
+                dirichlet_alpha=0.3,
+                noise_epsilon=0.25
+            )
 
             # Sample move from MCTS policy
             move = np.random.choice(9, p=mcts_policy)

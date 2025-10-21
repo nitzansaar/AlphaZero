@@ -94,8 +94,13 @@ class NNAgent:
         # Run MCTS to get action probabilities
         # Use temperature=1.0 to show proportional visit count distribution
         # This will show the actual MCTS evaluation instead of just greedy selection
+        # Add Dirichlet noise to force exploration even when network is confident
         action_probs, _ = self._mcts.get_action_probs(
-            board_flat, current_player, temperature=1.0  # Shows visit proportions
+            board_flat, current_player,
+            temperature=1.0,  # Shows visit proportions
+            add_noise=True,   # Force exploration by adding noise to priors
+            dirichlet_alpha=0.3,  # Controls noise uniformity
+            noise_epsilon=0.25    # 25% noise, 75% network prior
         )
 
         # Print MCTS move probabilities for legal moves
