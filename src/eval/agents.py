@@ -92,15 +92,14 @@ class NNAgent:
         print(f"Running MCTS with {self._num_simulations} simulations...")
 
         # Run MCTS to get action probabilities
-        # Use temperature=1.0 to show proportional visit count distribution
-        # This will show the actual MCTS evaluation instead of just greedy selection
-        # Add Dirichlet noise to force exploration even when network is confident
+        # During actual gameplay (not training), use pure exploitation:
+        # - temperature=0: Select only the most-visited move (greedy/deterministic)
+        # - add_noise=False: No exploration noise, use network policy as-is
+        # This gives the strongest play based on what the network learned during training
         action_probs, _ = self._mcts.get_action_probs(
             board_flat, current_player,
-            temperature=1.0,  # Shows visit proportions
-            add_noise=True,   # Force exploration by adding noise to priors
-            dirichlet_alpha=0.3,  # Controls noise uniformity
-            noise_epsilon=0.25    # 25% noise, 75% network prior
+            temperature=0,      # Greedy: always pick best move (most visits)
+            add_noise=False     # No exploration during gameplay
         )
 
         # Print MCTS move probabilities for legal moves

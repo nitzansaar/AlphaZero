@@ -312,19 +312,22 @@ class MCTS:
 class SelfPlayGame:
     """Manages a single self-play game using MCTS for move selection."""
 
-    def __init__(self, model: nn.Module, device: str, num_simulations: int = 50, temperature: float = 1.0, verbose: bool = False):
+    def __init__(self, model: nn.Module, device: str, num_simulations: int = 50, temperature: float = 1.0,
+                 add_noise: bool = True, verbose: bool = False):
         """
         Args:
             model: Neural network model (policy + value)
             device: 'cpu' or 'cuda'
             num_simulations: Number of MCTS simulations per move
             temperature: Temperature for move selection (1.0 = stochastic, 0 = greedy)
+            add_noise: Add Dirichlet noise for exploration (True for training, False for evaluation)
             verbose: Enable detailed logging during self-play
         """
         self.model = model
         self.device = device
         self.mcts = MCTS(model, device, num_simulations=num_simulations)
         self.temperature = temperature
+        self.add_noise = add_noise
         self.game_history = []  # List of (state, mcts_policy, player) tuples
         self.verbose = verbose
 
@@ -373,11 +376,13 @@ class SelfPlayGame:
                 print(f"Current player: {current_player} ({'X' if current_player == 1 else 'O'})")
                 print(f"Temperature: {temp:.2f}")
 
-            # Get MCTS policy with Dirichlet noise to encourage exploration
+            # Get MCTS policy
+            # During training: add_noise=True for exploration
+            # During evaluation: add_noise=False for exploitation (strongest play)
             mcts_policy, _ = self.mcts.get_action_probs(
                 board, current_player,
                 temperature=temp,
-                add_noise=True,  # Add noise during self-play for exploration
+                add_noise=self.add_noise,  # Controlled by initialization
                 dirichlet_alpha=0.3,
                 noise_epsilon=0.25
             )
@@ -506,8 +511,9 @@ def train_self_play(model: nn.Module, episodes: int = 1000,
         if verbose:
             print("\n[1/3] SELF-PLAY: Generating game with MCTS...")
 
+        # Training: use exploration (add_noise=True) to discover diverse strategies
         game_engine = SelfPlayGame(model, device, num_simulations=num_simulations,
-                                   temperature=temperature, verbose=verbose)
+                                   temperature=temperature, add_noise=True, verbose=verbose)
         game_result, game_history = game_engine.play_game()
 
         # Add to replay buffer
@@ -720,7 +726,9 @@ def evaluate_model(model: nn.Module, num_games: int = 100, device: str = 'cpu', 
         num_simulations: Number of MCTS simulations for evaluation (higher = stronger)
     """
     model.eval()
-    game_engine = SelfPlayGame(model, device, num_simulations=num_simulations, temperature=0.0)  # Greedy
+    # Evaluation: use greedy selection (temperature=0) and no exploration noise
+    game_engine = SelfPlayGame(model, device, num_simulations=num_simulations,
+                               temperature=0.0, add_noise=False)
 
     results = {'player1_wins': 0, 'player2_wins': 0, 'draws': 0}
 
