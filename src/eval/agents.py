@@ -9,43 +9,51 @@ import torch
 import torch.nn.functional as F
 
 try:
-    # Use the exact model architecture defined in the trainer
-    from src.trainer.train_neural_net import TicTacToeNet  # type: ignore
+    # Use the exact model architecture and MCTS from self-play trainer
+    from src.trainer.train_self_play import TicTacToeNet, MCTS  # type: ignore
 except Exception:
     TicTacToeNet = None  # type: ignore
+    MCTS = None  # type: ignore
 
 
 class NNAgent:
-    """Agent that plays using a trained NN (3x3 supported)."""
-    
-    def __init__(self, name: str = "NN Agent"):
+    """Agent that plays using AlphaZero-style MCTS + NN (3x3 supported)."""
+
+    def __init__(self, name: str = "NN Agent", num_simulations: int = 500):
         """
         Initialize agent.
-        
+
         Args:
             name: Agent name for display
+            num_simulations: Number of MCTS simulations per move (higher = stronger but slower)
         """
         self.name = name
         self._model = None
+        self._mcts = None
         self._device = torch.device("cpu")
+        self._num_simulations = num_simulations
         self._maybe_load_model()
     
     def _maybe_load_model(self) -> None:
-        """Load the NN weights if the architecture and checkpoint exist."""
-        checkpoint_path = "tictactoe_model.pth"
-        if TicTacToeNet is None:
+        """Load the NN weights and initialize MCTS if the architecture and checkpoint exist."""
+        checkpoint_path = "tictactoe_selfplay_final.pth"
+        if TicTacToeNet is None or MCTS is None:
             return
         if not os.path.exists(checkpoint_path):
             return
         try:
-            model = TicTacToeNet()  # 9->64->9 MLP from trainer
+            model = TicTacToeNet()  # AlphaZero-style Conv2d model with policy + value heads
             state = torch.load(checkpoint_path, map_location=self._device)
             model.load_state_dict(state)
             model.eval()
             self._model = model.to(self._device)
+
+            # Initialize MCTS with the loaded model (debug=True to see visit counts)
+            self._mcts = MCTS(self._model, str(self._device), num_simulations=self._num_simulations, debug=True)
         except Exception:
-            # Leave model as None to gracefully fall back to random
+            # Leave model as None to gracefully fall back to error
             self._model = None
+            self._mcts = None
     
     def _board_to_canonical_3d(self, env) -> torch.Tensor:
         """
@@ -72,47 +80,53 @@ class NNAgent:
         # Convert to torch and add batch dimension: (3, 3, 3) -> (1, 3, 3, 3)
         return torch.from_numpy(planes).unsqueeze(0).to(self._device)
 
-    def _nn_select_move(self, env) -> Tuple[int, int]:
-        """Select move via NN logits masked by legality (3x3 only)."""
+    def _mcts_select_move(self, env) -> Tuple[int, int]:
+        """Select move using MCTS search (3x3 only)."""
         if env.n != 3:
-            raise RuntimeError("NN policy only supports 3x3 boards.")
-        # Convert board to canonical 3-plane representation
-        board_3d = self._board_to_canonical_3d(env)  # shape (1, 3, 3, 3)
-        with torch.no_grad():
-            logits = self._model(board_3d).squeeze(0)  # shape (9,)
-        # Mask illegal moves
+            raise RuntimeError("MCTS policy only supports 3x3 boards.")
+
+        # Convert board to flat list format for MCTS
+        board_flat = env.board.flatten().tolist()
+        current_player = env.current_player
+
+        print(f"Running MCTS with {self._num_simulations} simulations...")
+
+        # Run MCTS to get action probabilities
+        # Use temperature=1.0 to show proportional visit count distribution
+        # This will show the actual MCTS evaluation instead of just greedy selection
+        action_probs, _ = self._mcts.get_action_probs(
+            board_flat, current_player, temperature=1.0  # Shows visit proportions
+        )
+
+        # Print MCTS move probabilities for legal moves
         legal_moves = env.get_legal_moves()
-        if not legal_moves:
-            raise ValueError("No legal moves available")
-        mask = torch.full((9,), float("-inf"), device=logits.device)
-        for (r, c) in legal_moves:
+        dist = []
+        for r, c in legal_moves:
             idx = r * env.n + c
-            mask[idx] = 0.0
-        masked_logits = logits + mask
-        # Softmax over masked logits to get probabilities on legal moves only
-        probs = F.softmax(masked_logits, dim=-1)
-        # Collect and print probabilities for legal moves
-        dist = [((i // env.n, i % env.n), float(probs[i])) for i in range(9) if mask[i] == 0.0]
+            dist.append(((r, c), action_probs[idx]))
         dist.sort(key=lambda x: x[1], reverse=True)
-        print("NN move probabilities:")
+
+        print("MCTS move probabilities:")
         for (r, c), p in dist:
             print(f"  ({r}, {c}): {p:.3f}")
-        best_idx = int(torch.argmax(probs).item())
+
+        # Select best move (highest probability from MCTS)
+        best_idx = int(max(range(9), key=lambda i: action_probs[i]))
         return best_idx // env.n, best_idx % env.n
     
     def get_move(self, env) -> Tuple[int, int]:
         """
-        Select a legal move using the neural network.
-        
+        Select a legal move using MCTS + neural network.
+
         Args:
             env: GameEnv instance
-        
+
         Returns:
             (row, col) tuple of selected move
         """
-        if self._model is None:
-            raise RuntimeError("NN model not loaded. Train via 'python -m src.trainer.train_neural_net' to create tictactoe_model.pth.")
-        return self._nn_select_move(env)
+        if self._model is None or self._mcts is None:
+            raise RuntimeError("AlphaZero model not loaded. Train via 'python -m src.trainer.train_self_play' to create tictactoe_selfplay_final.pth.")
+        return self._mcts_select_move(env)
 
 
 class HumanAgent:
