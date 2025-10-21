@@ -696,7 +696,7 @@ def plot_training_progress(history: dict, save_path: str = "training_progress.pn
     ax3.plot(episodes, history['policy_loss'], color='orange', linewidth=2)
     ax3.set_xlabel('Episodes', fontsize=12)
     ax3.set_ylabel('Policy Loss', fontsize=12)
-    ax3.set_title('Policy Loss (Cross-Entropy)', fontsize=14, fontweight='bold')
+    ax3.set_title('Policy Loss', fontsize=14, fontweight='bold')
     ax3.grid(True, alpha=0.3)
 
     # Plot 4: Value loss over time
@@ -704,7 +704,7 @@ def plot_training_progress(history: dict, save_path: str = "training_progress.pn
     ax4.plot(episodes, history['value_loss'], color='brown', linewidth=2)
     ax4.set_xlabel('Episodes', fontsize=12)
     ax4.set_ylabel('Value Loss', fontsize=12)
-    ax4.set_title('Value Loss (MSE)', fontsize=14, fontweight='bold')
+    ax4.set_title('Value Loss', fontsize=14, fontweight='bold')
     ax4.grid(True, alpha=0.3)
 
     plt.tight_layout()
@@ -713,53 +713,14 @@ def plot_training_progress(history: dict, save_path: str = "training_progress.pn
     plt.close()
 
 
-# ---------- 8. EVALUATION ----------
-
-def evaluate_model(model: nn.Module, num_games: int = 100, device: str = 'cpu', num_simulations: int = 100):
-    """
-    Evaluate the trained model by playing games with MCTS.
-
-    Args:
-        model: Trained TicTacToeNet
-        num_games: Number of evaluation games
-        device: 'cpu' or 'cuda'
-        num_simulations: Number of MCTS simulations for evaluation (higher = stronger)
-    """
-    model.eval()
-    # Evaluation: use greedy selection (temperature=0) and no exploration noise
-    game_engine = SelfPlayGame(model, device, num_simulations=num_simulations,
-                               temperature=0.0, add_noise=False)
-
-    results = {'player1_wins': 0, 'player2_wins': 0, 'draws': 0}
-
-    print(f"\nEvaluating model over {num_games} games (MCTS with {num_simulations} sims)...")
-
-    for _ in range(num_games):
-        game_result, _ = game_engine.play_game()
-
-        if game_result == 1:
-            results['player1_wins'] += 1
-        elif game_result == -1:
-            results['player2_wins'] += 1
-        else:
-            results['draws'] += 1
-
-    print(f"\nEvaluation Results:")
-    print(f"  Player 1 wins: {results['player1_wins']} ({100*results['player1_wins']/num_games:.1f}%)")
-    print(f"  Player 2 wins: {results['player2_wins']} ({100*results['player2_wins']/num_games:.1f}%)")
-    print(f"  Draws: {results['draws']} ({100*results['draws']/num_games:.1f}%)")
-
-    return results
-
-
-# ---------- 9. MAIN ENTRY ----------
+# ---------- 8. MAIN ENTRY ----------
 
 if __name__ == "__main__":
     print("=" * 60)
     print("ALPHAZERO-STYLE MCTS + NN TRAINING FOR TIC-TAC-TOE")
     print("=" * 60)
 
-    # Set device
+    # Set device to GPU if available, otherwise use CPU
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"\nUsing device: {device}")
     if device == 'cuda':
@@ -767,14 +728,14 @@ if __name__ == "__main__":
         print(f"   GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
 
     # Create model
-    print("\n[1/4] Initializing AlphaZero-style neural network (policy + value)...")
+    print("\n[1/3] Initializing AlphaZero-style neural network (policy + value)...")
     model = TicTacToeNet()
     total_params = sum(p.numel() for p in model.parameters())
     print(f"   Model parameters: {total_params:,}")
     print(f"   Architecture: 3-plane CNN -> policy head (9) + value head (1)")
 
     # Train with AlphaZero-style self-play
-    print("\n[2/4] Training with AlphaZero-style self-play (MCTS + NN)...")
+    print("\n[2/3] Training with AlphaZero-style self-play (MCTS + NN)...")
     print("NOTE: For optimal play, train for 20k-50k episodes.")
     print("      Current setting (100k) provides near-optimal tactical play.")
     print("-" * 60)
@@ -794,14 +755,9 @@ if __name__ == "__main__":
     )
 
     # Visualize training progress
-    print("\n[3/4] Generating training visualization...")
+    print("\n[3/3] Generating training visualization...")
     print("-" * 60)
     plot_training_progress(history)
-
-    # Evaluate
-    print("\n[4/4] Evaluating trained model...")
-    print("-" * 60)
-    evaluate_model(model, num_games=100, device=device, num_simulations=100)
 
     print("\n" + "=" * 60)
     print("TRAINING COMPLETE - AlphaZero-style model ready!")

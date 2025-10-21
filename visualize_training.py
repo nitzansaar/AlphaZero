@@ -50,7 +50,7 @@ def plot_training_progress(history: dict, save_path: str = "training_progress.pn
     ax3.plot(episodes, history['policy_loss'], color='orange', linewidth=2)
     ax3.set_xlabel('Episodes', fontsize=12)
     ax3.set_ylabel('Policy Loss', fontsize=12)
-    ax3.set_title('Policy Loss (Cross-Entropy)', fontsize=14, fontweight='bold')
+    ax3.set_title('Policy Loss', fontsize=14, fontweight='bold')
     ax3.grid(True, alpha=0.3)
 
     # Plot 4: Value loss over time
