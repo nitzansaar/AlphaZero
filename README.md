@@ -64,11 +64,6 @@ python play_cli.py -p1 human -p2 human
 python play_cli.py -p1 nn -p2 nn
 ```
 
-**Visualize training progress:**
-```bash
-python visualize_training.py
-```
-
 ### Run Tests
 
 ```bash
@@ -118,8 +113,7 @@ pytest tests/ --cov=src --cov-report=html
 - ✅ Training visualization (4-panel plots)
 - ✅ GPU optimization (10x speedup)
 - ✅ Checkpoint saving every 500 episodes
-- ✅ Training history export to JSON
-
+- 
 **Remaining:**
 - 🔄 Retrain with fixed MCTS exploration bug
 - 🔄 Validate model achieves >90% draw rate
@@ -135,7 +129,7 @@ pytest tests/ --cov=src --cov-report=html
 - Add early stopping based on performance
 
 ### 📋 Milestone 6: Scaling to Larger Boards & Evaluation (Not Started - Due 11/11/2025)
-- Generalize to 5×5 K=4 boards
+- Generalize to 5×5 K=4 boards (should eventually work N by N K in a row)
 - Collect quantitative results
 - Compare against baselines
 - Measure strategic depth
@@ -153,7 +147,7 @@ pytest tests/ --cov=src --cov-report=html
 - **Dual-head architecture**: Policy (move probabilities) + Value (position evaluation)
 - **Experience replay**: 10k position buffer for stable learning
 - **Learning rate scheduling**: Prevents late-stage training instability
-- **GPU acceleration**: 10x faster training on NVIDIA T4
+- **GPU acceleration**: supports GPU training if one exists on your machine
 
 ### MCTS Implementation
 - **UCB-based selection**: Balances exploration and exploitation
@@ -162,24 +156,11 @@ pytest tests/ --cov=src --cov-report=html
 - **Configurable simulations**: 50 during training, 500 during play
 - **Debug visualization**: Shows visit counts and average values
 
-### Training Visualization
-- **Real-time metrics**: Win rates, policy loss, value loss
-- **4-panel plots**: Comprehensive training progress
-- **JSON export**: Full history for custom analysis
-- **Checkpoint saving**: Models saved every 500 episodes
-
 ### Gameplay
 - **MCTS-powered moves**: 500 simulations per move
 - **Tactical play**: Finds blocks, forks, and winning sequences
 - **Debug mode**: See exactly what the AI is thinking
 - **Probability display**: Shows move evaluation percentages
-
-## Documentation
-
-- **[TRAINING_GUIDE.md](TRAINING_GUIDE.md)**: Complete training documentation
-- **[CLOUD_TRAINING.md](CLOUD_TRAINING.md)**: Google Cloud GPU deployment
-- **[CHANGELOG.md](CHANGELOG.md)**: Detailed change history
-- **[FIXES_APPLIED.md](FIXES_APPLIED.md)**: Bug fixes and solutions
 
 ## Performance
 
