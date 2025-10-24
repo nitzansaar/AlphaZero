@@ -8,9 +8,11 @@ and a random player to measure the performance of the trained agent.
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import List
+from typing import List, Tuple
 import sys
 import os
+import json
+from datetime import datetime
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
@@ -60,7 +62,7 @@ class NeuralNetPlayer:
         return self.name
 
 
-def play_game(player1, player2, verbose: bool = False) -> int:
+def play_game(player1, player2, verbose: bool = False, track_history: bool = False) -> Tuple[int, List[dict]]:
     """
     Play a single game between two players.
 
@@ -68,13 +70,17 @@ def play_game(player1, player2, verbose: bool = False) -> int:
         player1: First player (plays X, moves first)
         player2: Second player (plays O)
         verbose: Whether to print game progress
+        track_history: Whether to track the full game history
 
     Returns:
-        Game result: 1 if player1 wins, -1 if player2 wins, 0 for draw
+        Tuple of (game_result, game_history)
+        - game_result: 1 if player1 wins, -1 if player2 wins, 0 for draw
+        - game_history: List of move records (empty if track_history=False)
     """
     board = [0] * 9
     current_player = 1
     move_count = 0
+    game_history = [] if track_history else None
 
     if verbose:
         print(f"\n{'='*50}")
@@ -89,7 +95,7 @@ def play_game(player1, player2, verbose: bool = False) -> int:
                 print_board(board)
                 result_str = "Player 1 (X) wins" if winner == 1 else "Player 2 (O) wins" if winner == -1 else "Draw"
                 print(f"\nResult: {result_str}")
-            return winner
+            return winner, game_history if track_history else []
 
         # Get move from current player
         if current_player == 1:
@@ -108,6 +114,17 @@ def play_game(player1, player2, verbose: bool = False) -> int:
                     move = player2.get_move(board)
             else:
                 raise ValueError("Player 2 does not have get_move method")
+
+        # Track move in history if requested
+        if track_history:
+            game_history.append({
+                'move_number': move_count + 1,
+                'player': current_player,
+                'player_symbol': 'X' if current_player == 1 else 'O',
+                'board_before': board.copy(),
+                'move_position': move,
+                'move_by': 'player1' if current_player == 1 else 'player2'
+            })
 
         # Apply move
         board[move] = current_player
@@ -132,8 +149,44 @@ def print_board(board: List[int]) -> None:
     print()
 
 
+def save_loss_history(game_history: List[dict], game_number: int, nn_player_symbol: str,
+                      loss_dir: str = "nn_losses") -> None:
+    """
+    Save the game history when NN loses to a file.
+
+    Args:
+        game_history: List of move records from the game
+        game_number: Game number in the evaluation sequence
+        nn_player_symbol: 'X' or 'O' depending on which player was NN
+        loss_dir: Directory to save loss files
+    """
+    # Create directory if it doesn't exist
+    os.makedirs(loss_dir, exist_ok=True)
+
+    # Generate filename with timestamp and game number
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"loss_game{game_number}_{nn_player_symbol}_{timestamp}.json"
+    filepath = os.path.join(loss_dir, filename)
+
+    # Prepare data to save
+    loss_data = {
+        'game_number': game_number,
+        'nn_played_as': nn_player_symbol,
+        'timestamp': timestamp,
+        'total_moves': len(game_history),
+        'moves': game_history
+    }
+
+    # Save to JSON file
+    with open(filepath, 'w') as f:
+        json.dump(loss_data, f, indent=2)
+
+    print(f"   Loss saved to: {filepath}")
+
+
 def simulate_games(nn_player, random_player, num_games: int = 1000,
-                   nn_plays_first: bool = True, verbose_games: int = 0) -> dict:
+                   nn_plays_first: bool = True, verbose_games: int = 0,
+                   save_losses: bool = True) -> dict:
     """
     Simulate multiple games between neural net player and random player.
 
@@ -143,6 +196,7 @@ def simulate_games(nn_player, random_player, num_games: int = 1000,
         num_games: Number of games to simulate
         nn_plays_first: If True, NN plays as X (first), otherwise as O (second)
         verbose_games: Number of initial games to show in detail
+        save_losses: If True, save game history when NN loses
 
     Returns:
         Dictionary with game statistics
@@ -151,20 +205,25 @@ def simulate_games(nn_player, random_player, num_games: int = 1000,
         'nn_wins': 0,
         'random_wins': 0,
         'draws': 0,
-        'game_results': []  # Store individual game results for plotting
+        'game_results': [],  # Store individual game results for plotting
+        'losses_saved': 0
     }
 
     player1 = nn_player if nn_plays_first else random_player
     player2 = random_player if nn_plays_first else nn_player
+    nn_symbol = 'X' if nn_plays_first else 'O'
 
     print(f"\nSimulating {num_games} games...")
     print(f"Neural Net plays as: {'X (first)' if nn_plays_first else 'O (second)'}")
     print(f"Random Player plays as: {'O (second)' if nn_plays_first else 'X (first)'}")
+    print(f"Save losses: {'Yes' if save_losses else 'No'}")
     print("-" * 60)
 
     for i in range(num_games):
         verbose = i < verbose_games
-        result = play_game(player1, player2, verbose=verbose)
+        # Track history only if we need to save losses
+        result, game_history = play_game(player1, player2, verbose=verbose,
+                                         track_history=save_losses)
 
         # Store result from neural net's perspective
         if nn_plays_first:
@@ -179,14 +238,19 @@ def simulate_games(nn_player, random_player, num_games: int = 1000,
             results['nn_wins'] += 1
         elif nn_result == -1:
             results['random_wins'] += 1
+            # Save the game history if NN lost
+            if save_losses and game_history:
+                save_loss_history(game_history, i + 1, nn_symbol)
+                results['losses_saved'] += 1
         else:
             results['draws'] += 1
 
         # Print progress
         if (i + 1) % 100 == 0:
             win_rate = 100.0 * results['nn_wins'] / (i + 1)
+            loss_info = f", Losses saved: {results['losses_saved']}" if save_losses else ""
             print(f"Games {i+1}/{num_games} - NN wins: {results['nn_wins']} ({win_rate:.1f}%), "
-                  f"Random wins: {results['random_wins']}, Draws: {results['draws']}")
+                  f"Random wins: {results['random_wins']}, Draws: {results['draws']}{loss_info}")
 
     return results
 
@@ -269,19 +333,31 @@ def main():
     print("\n[1/4] Loading trained neural network model...")
     model = TicTacToeNet()
 
-    # Try to load the final model, or fall back to checkpoint
-    model_path = "tictactoe_selfplay_final.pth"
+    # Try to load the final model from models/, or fall back to latest checkpoint
+    model_path = os.path.join("models", "tictactoe_selfplay_final.pth")
     if not os.path.exists(model_path):
-        print(f"Warning: {model_path} not found, looking for checkpoint...")
-        # Find the most recent checkpoint
-        checkpoints = [f for f in os.listdir('.') if f.startswith('tictactoe_alphazero_ep') and f.endswith('.pth')]
+        print(f"Warning: {model_path} not found, looking for checkpoint in models/...")
+        checkpoints = []
+        if os.path.isdir("models"):
+            checkpoints = [f for f in os.listdir('models') if f.startswith('tictactoe_alphazero_ep') and f.endswith('.pth')]
         if checkpoints:
-            # Sort by episode number
+            # Sort by episode number and select the newest
             checkpoints.sort(key=lambda x: int(x.split('ep')[1].split('.')[0]), reverse=True)
-            model_path = checkpoints[0]
+            model_path = os.path.join('models', checkpoints[0])
             print(f"Found checkpoint: {model_path}")
         else:
-            raise FileNotFoundError("No trained model found. Please run train_self_play.py first.")
+            # Backward compatibility: look in repo root
+            root_final = "tictactoe_selfplay_final.pth"
+            if os.path.exists(root_final):
+                model_path = root_final
+            else:
+                root_checkpoints = [f for f in os.listdir('.') if f.startswith('tictactoe_alphazero_ep') and f.endswith('.pth')]
+                if root_checkpoints:
+                    root_checkpoints.sort(key=lambda x: int(x.split('ep')[1].split('.')[0]), reverse=True)
+                    model_path = root_checkpoints[0]
+                    print(f"Found checkpoint: {model_path}")
+                else:
+                    raise FileNotFoundError("No trained model found. Please run train_self_play.py first.")
 
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.to(device)
@@ -299,12 +375,12 @@ def main():
     print("\n[3/4] Running simulations...")
     print("\n--- Scenario 1: Neural Net plays FIRST (as X) ---")
     results_first = simulate_games(nn_player, random_player, num_games=1000,
-                                   nn_plays_first=True, verbose_games=0)
+                                   nn_plays_first=True, verbose_games=0, save_losses=True)
 
     # Simulate games with NN playing second
     print("\n--- Scenario 2: Neural Net plays SECOND (as O) ---")
     results_second = simulate_games(nn_player, random_player, num_games=1000,
-                                    nn_plays_first=False, verbose_games=0)
+                                    nn_plays_first=False, verbose_games=0, save_losses=True)
 
     # Print summary statistics
     print("\n" + "=" * 60)
@@ -326,12 +402,14 @@ def main():
     overall_nn_wins = results_first['nn_wins'] + results_second['nn_wins']
     overall_random_wins = results_first['random_wins'] + results_second['random_wins']
     overall_draws = results_first['draws'] + results_second['draws']
+    overall_losses_saved = results_first['losses_saved'] + results_second['losses_saved']
     total_games = total_games_first + total_games_second
 
     print(f"\nOverall Results - {total_games} total games")
     print(f"  NN Wins:     {overall_nn_wins:4d} ({100.0 * overall_nn_wins / total_games:.1f}%)")
     print(f"  Random Wins: {overall_random_wins:4d} ({100.0 * overall_random_wins / total_games:.1f}%)")
     print(f"  Draws:       {overall_draws:4d} ({100.0 * overall_draws / total_games:.1f}%)")
+    print(f"\nLosses saved to files: {overall_losses_saved} (in 'nn_losses/' directory)")
 
     # Plot results
     print("\n[4/4] Generating visualization...")

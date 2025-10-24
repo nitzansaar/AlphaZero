@@ -36,11 +36,16 @@ class NNAgent:
     
     def _maybe_load_model(self) -> None:
         """Load the NN weights and initialize MCTS if the architecture and checkpoint exist."""
-        checkpoint_path = "tictactoe_selfplay_final.pth"
+        checkpoint_path = os.path.join("models", "tictactoe_selfplay_final.pth")
         if TicTacToeNet is None or MCTS is None:
             return
         if not os.path.exists(checkpoint_path):
-            return
+            # Backward compatibility: fall back to root if models/ not used yet
+            fallback = "tictactoe_selfplay_final.pth"
+            if os.path.exists(fallback):
+                checkpoint_path = fallback
+            else:
+                return
         try:
             model = TicTacToeNet()  # AlphaZero-style Conv2d model with policy + value heads
             state = torch.load(checkpoint_path, map_location=self._device)

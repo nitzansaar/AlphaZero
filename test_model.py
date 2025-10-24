@@ -5,6 +5,7 @@ Test script to verify the trained model is working correctly.
 
 import torch
 import numpy as np
+import os
 from src.trainer.train_self_play import TicTacToeNet, MCTS, board_to_canonical_3d
 
 def test_model():
@@ -15,7 +16,10 @@ def test_model():
     model = TicTacToeNet()
 
     try:
-        model.load_state_dict(torch.load('tictactoe_selfplay_final.pth', map_location=device))
+        checkpoint_path = os.path.join('models', 'tictactoe_selfplay_final.pth')
+        if not os.path.exists(checkpoint_path):
+            checkpoint_path = 'tictactoe_selfplay_final.pth'
+        model.load_state_dict(torch.load(checkpoint_path, map_location=device))
         model.eval()
         print("✓ Model loaded successfully\n")
     except Exception as e:
