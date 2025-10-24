@@ -23,6 +23,7 @@ from collections import deque
 import random
 import matplotlib.pyplot as plt
 import json
+import os
 
 # ---------- 1. MODEL DEFINITION ----------
 
@@ -33,6 +34,10 @@ class TicTacToeNet(nn.Module):
     Outputs:
         - policy: (batch, 9) - move probability logits
         - value: (batch, 1) - position evaluation in [-1, 1]
+
+    TODO: make adjustable for N×N, K in a rowboards in future.
+    - increase number of training episodes
+    - use GPU for faster training
     """
     def __init__(self):
         super().__init__()
@@ -497,6 +502,9 @@ def train_self_play(model: nn.Module, episodes: int = 1000,
     print(f"Temperature: {temperature}")
     print("-" * 60)
 
+    # Ensure models/ directory exists for saving checkpoints and final model
+    os.makedirs("models", exist_ok=True)
+
     for episode in range(episodes):
         verbose = episode < verbose_episodes
 
@@ -635,10 +643,10 @@ def train_self_play(model: nn.Module, episodes: int = 1000,
 
             # Save checkpoint
             if (episode + 1) % 500 == 0:
-                torch.save(model.state_dict(), f"tictactoe_alphazero_ep{episode+1}.pth")
+                torch.save(model.state_dict(), f"models/tictactoe_alphazero_ep{episode+1}.pth")
 
     # Save final model
-    torch.save(model.state_dict(), "tictactoe_selfplay_final.pth")
+    torch.save(model.state_dict(), "models/tictactoe_selfplay_final.pth")
 
     # Save training history
     with open("training_history.json", "w") as f:
@@ -650,7 +658,7 @@ def train_self_play(model: nn.Module, episodes: int = 1000,
     print(f"     Player 1 wins: {stats['player1_wins']} ({100*stats['player1_wins']/episodes:.1f}%)")
     print(f"     Player 2 wins: {stats['player2_wins']} ({100*stats['player2_wins']/episodes:.1f}%)")
     print(f"     Draws: {stats['draws']} ({100*stats['draws']/episodes:.1f}%)")
-    print(f"   Model saved: tictactoe_selfplay_final.pth")
+    print(f"   Model saved: models/tictactoe_selfplay_final.pth")
     print(f"   Training history saved: training_history.json")
 
     return history

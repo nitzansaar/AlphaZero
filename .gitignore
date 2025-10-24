@@ -77,3 +77,5 @@ dmypy.json
 *.swp
 *~
 
+# Loss files
+nn_losses/
