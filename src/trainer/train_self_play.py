@@ -506,7 +506,8 @@ def train_self_play(model: nn.Module, episodes: int = 1000,
     os.makedirs("models", exist_ok=True)
 
     for episode in range(episodes):
-        verbose = episode < verbose_episodes
+        # verbose = episode < verbose_episodes
+        verbose = False
 
         if verbose:
             print(f"\n{'#'*70}")
