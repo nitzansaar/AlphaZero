@@ -653,7 +653,7 @@ def train_self_play(model: nn.Module, episodes: int = 1000,
     with open("training_history.json", "w") as f:
         json.dump(history, f, indent=2)
 
-    print(f"\n✅ AlphaZero-style training complete!")
+    print(f"\n AlphaZero-style training complete!")
     print(f"   Total games played: {episodes}")
     print(f"   Final statistics:")
     print(f"     Player 1 wins: {stats['player1_wins']} ({100*stats['player1_wins']/episodes:.1f}%)")
@@ -718,7 +718,7 @@ def plot_training_progress(history: dict, save_path: str = "training_progress.pn
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    print(f"\n📊 Training progress plot saved: {save_path}")
+    print(f"\n Training progress plot saved: {save_path}")
     plt.close()
 
 
