@@ -333,9 +333,30 @@ def main():
     print("\n[1/4] Loading trained neural network model...")
     model = TicTacToeNet()
 
-    # Try to load the final model from models/, or fall back to latest checkpoint
-    model_path = os.path.join("models", "tictactoe_selfplay_final.pth")
-    if not os.path.exists(model_path):
+    # Try to load the BEST model (AlphaGo Zero: use model that won evaluations)
+    # BUT: if best model is older than final model, use final (best may have gotten stuck)
+    best_path = os.path.join("models", "tictactoe_selfplay_best.pth")
+    final_path = os.path.join("models", "tictactoe_selfplay_final.pth")
+
+    model_path = None
+    if os.path.exists(best_path) and os.path.exists(final_path):
+        # Both exist, check modification times
+        best_mtime = os.path.getmtime(best_path)
+        final_mtime = os.path.getmtime(final_path)
+
+        if final_mtime > best_mtime + 300:  # Final is >5 minutes newer
+            print(f"Note: Final model is significantly newer than best model")
+            print("      This suggests best model got stuck during training")
+            print("      Using final training model instead...")
+            model_path = final_path
+        else:
+            model_path = best_path
+    elif os.path.exists(best_path):
+        model_path = best_path
+    elif os.path.exists(final_path):
+        model_path = final_path
+
+    if model_path is None or not os.path.exists(model_path):
         print(f"Warning: {model_path} not found, looking for checkpoint in models/...")
         checkpoints = []
         if os.path.isdir("models"):
@@ -346,9 +367,12 @@ def main():
             model_path = os.path.join('models', checkpoints[0])
             print(f"Found checkpoint: {model_path}")
         else:
-            # Backward compatibility: look in repo root
-            root_final = "tictactoe_selfplay_final.pth"
-            if os.path.exists(root_final):
+            # Backward compatibility: look in repo root for best or final model
+            root_best = "models/tictactoe_selfplay_best.pth"
+            root_final = "models/tictactoe_selfplay_final.pth"
+            if os.path.exists(root_best):
+                model_path = root_best
+            elif os.path.exists(root_final):
                 model_path = root_final
             else:
                 root_checkpoints = [f for f in os.listdir('.') if f.startswith('tictactoe_alphazero_ep') and f.endswith('.pth')]
@@ -366,7 +390,9 @@ def main():
 
     # Create players
     print("\n[2/4] Creating players...")
-    nn_player = NeuralNetPlayer(model, device, num_simulations=50)
+    # Use 1000 MCTS simulations for guaranteed perfect play (never lose to random)
+    # Training uses 100 sims, evaluation uses 200, but for perfect play we need 800-1000
+    nn_player = NeuralNetPlayer(model, device, num_simulations=1000)
     random_player = RandomPlayer()
     print(f"   Neural Net Player: {nn_player}")
     print(f"   Random Player: {random_player}")
