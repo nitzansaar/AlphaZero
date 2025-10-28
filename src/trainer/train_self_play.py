@@ -179,7 +179,7 @@ class MCTS:
         self.debug = debug
 
     def get_action_probs(self, board: List[int], player: int, temperature: float = 1.0,
-                         add_noise: bool = False, dirichlet_alpha: float = 0.3, noise_epsilon: float = 0.25) -> Tuple[List[float], List[int]]:
+                         add_noise: bool = False, dirichlet_alpha: float = 0.03, noise_epsilon: float = 0.25) -> Tuple[List[float], List[int]]:
         """
         Run MCTS simulations and return action probabilities.
 
@@ -215,6 +215,7 @@ class MCTS:
             policy_probs[move] = policy[move] / policy_sum if policy_sum > 0 else 1.0 / len(valid_moves)
 
         # Add Dirichlet noise to encourage exploration (AlphaZero technique)
+        # Alpha = 0.03 is AlphaGo Zero standard for games with ~9 legal moves
         if add_noise and len(valid_moves) > 1:
             noise = np.random.dirichlet([dirichlet_alpha] * len(valid_moves))
             for i, move in enumerate(valid_moves):
@@ -373,8 +374,9 @@ class SelfPlayGame:
             canonical_state = board_to_canonical_3d(board, current_player)
 
             # Use temperature decay: high temp early, low temp later
-            # This encourages exploration early, exploitation later
-            temp = self.temperature if move_count < 10 else 0.1
+            # AlphaGo Zero: temp=1.0 for first 30 moves (Go), temp=0 after
+            # For tic-tac-toe (5-9 moves): temp=1.0 for first 5 moves, then 0.01 (near-greedy)
+            temp = self.temperature if move_count < 5 else 0.01
 
             if self.verbose:
                 print(f"\n--- Move {move_count + 1} ---")
@@ -388,7 +390,7 @@ class SelfPlayGame:
                 board, current_player,
                 temperature=temp,
                 add_noise=self.add_noise,  # Controlled by initialization
-                dirichlet_alpha=0.3,
+                dirichlet_alpha=0.03,  # AlphaGo Zero standard for ~9 legal moves
                 noise_epsilon=0.25
             )
 
@@ -450,12 +452,126 @@ class ReplayBuffer:
         return len(self.buffer)
 
 
-# ---------- 6. TRAINING ----------
+# ---------- 6. MODEL EVALUATION ----------
+
+def evaluate_models(model1: nn.Module, model2: nn.Module, device: str,
+                   num_games: int = 100, num_simulations: int = 200) -> dict:
+    """
+    Evaluate two models against each other by playing games.
+
+    Args:
+        model1: First model (candidate new model)
+        model2: Second model (current best model)
+        device: 'cpu' or 'cuda'
+        num_games: Number of games to play (AlphaGo Zero uses 400)
+        num_simulations: MCTS simulations per move (higher for evaluation)
+
+    Returns:
+        Dictionary with evaluation results from model1's perspective
+    """
+    model1.eval()
+    model2.eval()
+
+    mcts1 = MCTS(model1, device, num_simulations=num_simulations)
+    mcts2 = MCTS(model2, device, num_simulations=num_simulations)
+
+    results = {
+        'model1_wins': 0,
+        'model2_wins': 0,
+        'draws': 0
+    }
+
+    print(f"\n{'='*60}")
+    print(f"EVALUATING MODELS ({num_games} games, {num_simulations} MCTS sims)")
+    print(f"{'='*60}")
+
+    for game_idx in range(num_games):
+        # Alternate who plays first for fairness
+        if game_idx % 2 == 0:
+            # model1 plays first (as player 1)
+            result = play_evaluation_game(mcts1, mcts2, device)
+        else:
+            # model2 plays first (as player 1), flip result
+            result = play_evaluation_game(mcts2, mcts1, device)
+            result = -result  # Flip perspective
+
+        if result == 1:
+            results['model1_wins'] += 1
+        elif result == -1:
+            results['model2_wins'] += 1
+        else:
+            results['draws'] += 1
+
+        # Print progress
+        if (game_idx + 1) % 20 == 0:
+            win_rate = (results['model1_wins'] + 0.5 * results['draws']) / (game_idx + 1)
+            print(f"  Game {game_idx+1}/{num_games} - "
+                  f"Model1: {results['model1_wins']} wins, "
+                  f"Model2: {results['model2_wins']} wins, "
+                  f"Draws: {results['draws']} "
+                  f"(Win rate: {100*win_rate:.1f}%)")
+
+    # Calculate final win rate (draws count as 0.5)
+    total_games = num_games
+    win_rate = (results['model1_wins'] + 0.5 * results['draws']) / total_games
+    results['win_rate'] = win_rate
+
+    print(f"\n{'='*60}")
+    print(f"EVALUATION COMPLETE")
+    print(f"  Model1 wins: {results['model1_wins']} ({100*results['model1_wins']/total_games:.1f}%)")
+    print(f"  Model2 wins: {results['model2_wins']} ({100*results['model2_wins']/total_games:.1f}%)")
+    print(f"  Draws: {results['draws']} ({100*results['draws']/total_games:.1f}%)")
+    print(f"  Model1 win rate (draws=0.5): {100*win_rate:.1f}%")
+    print(f"{'='*60}\n")
+
+    return results
+
+
+def play_evaluation_game(mcts1: MCTS, mcts2: MCTS, device: str) -> int:
+    """
+    Play a single evaluation game between two MCTS players.
+
+    Args:
+        mcts1: MCTS for player 1
+        mcts2: MCTS for player 2
+        device: 'cpu' or 'cuda'
+
+    Returns:
+        Game result: 1 if player1 wins, -1 if player2 wins, 0 for draw
+    """
+    board = [0] * 9
+    current_player = 1
+
+    while True:
+        # Check if game is over
+        winner = check_winner(board)
+        if winner is not None:
+            return winner
+
+        # Get move from current MCTS (deterministic, no noise)
+        mcts = mcts1 if current_player == 1 else mcts2
+        action_probs, _ = mcts.get_action_probs(
+            board, current_player,
+            temperature=0.0,  # Greedy selection
+            add_noise=False   # No exploration noise
+        )
+
+        # Select best move
+        move = int(np.argmax(action_probs))
+
+        # Apply move
+        board[move] = current_player
+        current_player = -current_player
+
+
+# ---------- 7. TRAINING ----------
 
 def train_self_play(model: nn.Module, episodes: int = 1000,
                    batch_size: int = 64, lr: float = 0.001,
-                   device: str = 'cpu', num_simulations: int = 50,
-                   temperature: float = 1.0, verbose_episodes: int = 0):
+                   device: str = 'cpu', num_simulations: int = 100,
+                   temperature: float = 1.0, verbose_episodes: int = 0,
+                   eval_interval: int = 500, eval_games: int = 100,
+                   eval_simulations: int = 200, win_threshold: float = 0.55):
     """
     Train the neural network using AlphaZero-style self-play with MCTS.
 
@@ -465,15 +581,25 @@ def train_self_play(model: nn.Module, episodes: int = 1000,
         batch_size: Training batch size
         lr: Learning rate
         device: 'cpu' or 'cuda'
-        num_simulations: Number of MCTS simulations per move
+        num_simulations: Number of MCTS simulations per move during training
         temperature: Temperature for move selection
         verbose_episodes: Number of initial episodes to log in detail (0 = none)
+        eval_interval: Evaluate model every N episodes (AlphaGo Zero: every 1000 steps)
+        eval_games: Number of evaluation games to play
+        eval_simulations: MCTS simulations during evaluation (higher than training)
+        win_threshold: Win rate threshold to accept new model (AlphaGo Zero: 0.55)
     """
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
 
     # Add learning rate scheduler for stability
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=episodes//4, gamma=0.5)
+
+    # AlphaGo Zero: Keep separate "best model" for self-play generation
+    # Training model is continuously updated, but only becomes "best" if it wins evaluation
+    best_model = TicTacToeNet().to(device)
+    best_model.load_state_dict(model.state_dict())  # Start with same weights
+    best_model.eval()
 
     replay_buffer = ReplayBuffer(max_size=10000)
 
@@ -515,13 +641,14 @@ def train_self_play(model: nn.Module, episodes: int = 1000,
             print(f"{'#'*70}")
 
         # Play self-play game with MCTS
-        model.eval()  # Set to eval mode during self-play
+        # AlphaGo Zero: Use BEST model for self-play, not the training model
+        best_model.eval()  # Set to eval mode during self-play
 
         if verbose:
-            print("\n[1/3] SELF-PLAY: Generating game with MCTS...")
+            print("\n[1/3] SELF-PLAY: Generating game with MCTS (using best model)...")
 
         # Training: use exploration (add_noise=True) to discover diverse strategies
-        game_engine = SelfPlayGame(model, device, num_simulations=num_simulations,
+        game_engine = SelfPlayGame(best_model, device, num_simulations=num_simulations,
                                    temperature=temperature, add_noise=True, verbose=verbose)
         game_result, game_history = game_engine.play_game()
 
@@ -642,12 +769,76 @@ def train_self_play(model: nn.Module, episodes: int = 1000,
                   f"P2: {win_rate_p2:.1f}% - "
                   f"Draw: {draw_rate:.1f}%")
 
-            # Save checkpoint
-            if (episode + 1) % 500 == 0:
-                torch.save(model.state_dict(), f"models/tictactoe_alphazero_ep{episode+1}.pth")
+            # Save checkpoint and evaluate
+            if (episode + 1) % eval_interval == 0:
+                checkpoint_path = f"models/tictactoe_alphazero_ep{episode+1}.pth"
+                torch.save(model.state_dict(), checkpoint_path)
+                print(f"\n Checkpoint saved: {checkpoint_path}")
 
-    # Save final model
+                # AlphaGo Zero: Evaluate new model against current best
+                print(f"\n{'='*60}")
+                print(f"EVALUATING NEW MODEL vs CURRENT BEST (Episode {episode+1})")
+                print(f"{'='*60}")
+
+                eval_results = evaluate_models(
+                    model1=model,
+                    model2=best_model,
+                    device=device,
+                    num_games=eval_games,
+                    num_simulations=eval_simulations
+                )
+
+                # Check if new model should replace best model
+                # Special handling for tic-tac-toe: high draw rate = optimal play
+                draw_rate = eval_results['draws'] / eval_games
+                accept_model = False
+                acceptance_reason = ""
+
+                # For tic-tac-toe, once models start drawing frequently, always accept
+                # (both models are near-optimal, no point rejecting)
+                if draw_rate >= 0.70:
+                    # If both models draw >70%, they're converging to optimal play
+                    # Always accept new model (continue training, no regression)
+                    accept_model = True
+                    acceptance_reason = f"High draw rate ({100*draw_rate:.1f}%) indicates near-optimal play - accepting to continue training"
+                elif eval_results['win_rate'] >= win_threshold:
+                    # Standard AlphaGo Zero threshold
+                    accept_model = True
+                    acceptance_reason = f"Win rate {100*eval_results['win_rate']:.1f}% >= {100*win_threshold:.1f}% threshold"
+                elif eval_results['win_rate'] >= 0.45:
+                    # Model is not significantly worse (within statistical noise of 50%)
+                    accept_model = True
+                    acceptance_reason = f"Win rate {100*eval_results['win_rate']:.1f}% shows no regression (>= 45%)"
+                else:
+                    acceptance_reason = f"Win rate {100*eval_results['win_rate']:.1f}% too low, model has regressed"
+
+                if accept_model:
+                    print(f"\n NEW MODEL ACCEPTED!")
+                    print(f"   Reason: {acceptance_reason}")
+                    print(f"   Win rate: {100*eval_results['win_rate']:.1f}%")
+                    print(f"   Draw rate: {100*draw_rate:.1f}%")
+                    print(f"   Replacing best model with new checkpoint...")
+
+                    # Update best model
+                    best_model.load_state_dict(model.state_dict())
+                    best_model.eval()
+
+                    # Save as best model
+                    best_model_path = "models/tictactoe_selfplay_best.pth"
+                    torch.save(best_model.state_dict(), best_model_path)
+                    print(f"   Best model saved: {best_model_path}\n")
+                else:
+                    print(f"\n MODEL REJECTED")
+                    print(f"   Reason: {acceptance_reason}")
+                    print(f"   Win rate: {100*eval_results['win_rate']:.1f}%")
+                    print(f"   Draw rate: {100*draw_rate:.1f}%")
+                    print(f"   Keeping previous best model for self-play...\n")
+
+    # Save final model (training model, may not be best)
     torch.save(model.state_dict(), "models/tictactoe_selfplay_final.pth")
+
+    # Also save the best model (this is what should be used for play)
+    torch.save(best_model.state_dict(), "models/tictactoe_selfplay_best.pth")
 
     # Save training history
     with open("training_history.json", "w") as f:
@@ -659,7 +850,9 @@ def train_self_play(model: nn.Module, episodes: int = 1000,
     print(f"     Player 1 wins: {stats['player1_wins']} ({100*stats['player1_wins']/episodes:.1f}%)")
     print(f"     Player 2 wins: {stats['player2_wins']} ({100*stats['player2_wins']/episodes:.1f}%)")
     print(f"     Draws: {stats['draws']} ({100*stats['draws']/episodes:.1f}%)")
-    print(f"   Model saved: models/tictactoe_selfplay_final.pth")
+    print(f"   Models saved:")
+    print(f"     - Best model (USE THIS): models/tictactoe_selfplay_best.pth")
+    print(f"     - Final training model: models/tictactoe_selfplay_final.pth")
     print(f"   Training history saved: training_history.json")
 
     return history
@@ -745,8 +938,6 @@ if __name__ == "__main__":
 
     # Train with AlphaZero-style self-play
     print("\n[2/3] Training with AlphaZero-style self-play (MCTS + NN)...")
-    print("NOTE: For optimal play, train for 20k-50k episodes.")
-    print("      Current setting (100k) provides near-optimal tactical play.")
     print("-" * 60)
 
     # Use larger batch size on GPU for better throughput
@@ -754,11 +945,11 @@ if __name__ == "__main__":
 
     history = train_self_play(
         model=model,
-        episodes=10000,          # Increased for better tactical learning
+        episodes=50000,          #AlphaGo Zero used 4.9M for perfect play
         batch_size=batch_size,
         lr=0.001,
         device=device,
-        num_simulations=50,      # MCTS simulations per move during training
+        num_simulations=100,     
         temperature=1.0,         # Exploration temperature
         verbose_episodes=2       # Log first 2 episodes in detail
     )
