@@ -79,3 +79,4 @@ dmypy.json
 
 # Loss files
 nn_losses/
+nn_check_pts/
