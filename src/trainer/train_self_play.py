@@ -42,17 +42,17 @@ class TicTacToeNet(nn.Module):
     def __init__(self):
         super().__init__()
         # Shared convolutional layers for spatial features
-        self.conv1 = nn.Conv2d(3, 32, kernel_size=2, padding=0)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=2, padding=0)
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
 
         # Shared fully connected layer
-        self.fc_shared = nn.Linear(64 * 1 * 1, 128)
+        self.fc_shared = nn.Linear(128 * 3 * 3, 256)
 
         # Policy head (move probabilities)
-        self.fc_policy = nn.Linear(128, 9)
+        self.fc_policy = nn.Linear(256, 9)
 
         # Value head (position evaluation)
-        self.fc_value1 = nn.Linear(128, 64)
+        self.fc_value1 = nn.Linear(256, 64)
         self.fc_value2 = nn.Linear(64, 1)
 
         self.relu = nn.ReLU()
@@ -61,11 +61,11 @@ class TicTacToeNet(nn.Module):
     def forward(self, x):
         # x shape: (batch, 3, 3, 3)
         # Shared conv layers
-        x = self.relu(self.conv1(x))  # (batch, 32, 2, 2)
-        x = self.relu(self.conv2(x))  # (batch, 64, 1, 1)
+        x = self.relu(self.conv1(x))  # (batch, 64, 3, 3)
+        x = self.relu(self.conv2(x))  # (batch, 128, 3, 3)
 
-        x = x.view(-1, 64)  # Flatten
-        x = self.dropout(self.relu(self.fc_shared(x)))  # (batch, 128)
+        x = x.view(-1, 128 * 3 * 3)  # Flatten
+        x = self.dropout(self.relu(self.fc_shared(x)))  # (batch, 256)
 
         # Policy head
         policy = self.fc_policy(x)  # (batch, 9)
