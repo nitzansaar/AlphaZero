@@ -15,6 +15,6 @@ chmod +x ./train.sh
 ./train.sh
 
 ## Simulate play versus random player
-python3 test_versus_random.py
+python3 test_vs_random.py
 
 
