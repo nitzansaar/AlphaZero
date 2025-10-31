@@ -14,11 +14,11 @@ This project implements a complete AlphaZero-inspired reinforcement learning sys
 - Uses dual-head neural network (policy + value)
 
 ## Train model
-cd src
-chmod +x ./train.sh
-./train.sh
+- cd src
+- chmod +x ./train.sh
+- ./train.sh
 
 ## Simulate play versus random player
-python3 test_vs_random.py
+- python3 test_vs_random.py
 
 
