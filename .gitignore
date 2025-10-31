@@ -80,3 +80,5 @@ dmypy.json
 # Loss files
 nn_losses/
 nn_check_pts/
+
+src/test_results.txt
