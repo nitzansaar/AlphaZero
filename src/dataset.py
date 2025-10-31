@@ -1,8 +1,4 @@
-import os
 import torch
-from torch import nn
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
 import numpy as np
 import pickle
 from copy import copy
@@ -23,12 +19,13 @@ class TicTacToeDataset:
 
 class TrainingDataset:
     def __init__(self):
-        self.training_dataset = []
-    def calculate_values(self,dataset,winner):
+        self.training_dataset = [] # list of tuples (state,value,policy)
+    
+    def calculate_values(self,dataset,winner): # assign value to each position in the dataset based on the winner
         for ind,step in enumerate(dataset):
             step_ = copy(step)
             step_player = step_[2]
-            if winner == 0:
+            if winner == 0: # draw
                 value = 0
             else:
                 if winner==step_player:
@@ -38,20 +35,20 @@ class TrainingDataset:
             step_.append(value)
             dataset[ind] = step_
         return dataset
-    def add_game_to_training_dataset(self,dataset,winner):
+    def add_game_to_training_dataset(self,dataset,winner): # add the completed game data to the training dataset
         data = self.calculate_values(dataset,winner)
         self.training_dataset.extend(data)
         self.training_dataset = self.training_dataset[-1*cfg.DATASET_QUEUE_SIZE:]    
     
-    def save(self,path):
+    def save(self,path): # save the training dataset to a pickle file
 #         pickle.dump(self.training_dataset,path)
         with open(path, 'wb') as handle:
             pickle.dump(self.training_dataset,handle)
-    def load(self,path):
+    def load(self,path): # load the training dataset from a pickle file
 #         self.training_dataset = pickle.load(path)
         with open(path, 'rb') as handle:
             self.training_dataset = pickle.load(handle)
-    def retreive_test_train_data(self):
+    def retreive_test_train_data(self): 
         data = self.training_dataset
         num_samples = len(data)
         train_idx = np.random.choice(np.arange(num_samples),int(cfg.TRAIN_TEST_SPLIT*num_samples),replace=False)

@@ -1,9 +1,6 @@
 import numpy as np
-import pandas as pd
-import os
 import math
 from copy import copy
-from tqdm import tqdm
 from config import Config as cfg
 
 class Node:
@@ -66,17 +63,14 @@ class Node:
     def is_leaf_node(self):
         return len(self.children)==0
     def select_best_child(self):
-        best_uscore = -999
+        best_uscore = float('-inf')
         for i,child in self.children.items():
             psa = child.prior_probs_P
             Ns = self.total_visits_N
             Nsa = child.total_visits_N
-            Cs = 1
+            Cs = 1 # exploration constant
             Q = child.mean_action_value_of_next_state_Q 
-#             temp setup
-#             Q=0
             Uscore = Q + Cs * psa * math.sqrt(Ns)/(1+Nsa)
-#             print(i,Uscore,Q,Cs * psa * math.sqrt(Ns)/(1+Nsa))
             if best_uscore<Uscore:
                 best_uscore = Uscore
                 best_child_index = i
@@ -89,7 +83,7 @@ class MonteCarloTreeSearch:
         self.policy_value_network = policy_value_network
         
     def init_root_node(self):
-        root_state = np.zeros(cfg.ACTION_SIZE)
+        root_state = np.zeros(cfg.ACTION_SIZE) 
         root_node = Node(prior_prob=0,player=1,action_index=None)
         root_node.set_state(root_state)
         return root_node
@@ -104,12 +98,11 @@ class MonteCarloTreeSearch:
                 value = -1 if winner==node.player else 1
             node.total_action_value_of_next_state_W = node.total_action_value_of_next_state_W + value
             node.mean_action_value_of_next_state_Q = node.total_action_value_of_next_state_W/node.total_visits_N
-#             print("st",node.state,"value",value,"plyer",node.player)
 
     def run_simulation(self,root_node,num_simulations=1600,player=1):
         root_state = root_node.state
-        next_player = -1*player
-        value,action_probs = self.policy_value_network(root_state)
+        next_player = -1*player 
+        value,action_probs = self.policy_value_network(root_state) #call the nn
         valid_moves = self.game.get_valid_moves(root_state)
         action_probs = action_probs * valid_moves
         root_node.expand(action_probs=action_probs,player=next_player,parent=root_node)
@@ -143,9 +136,11 @@ class MonteCarloTreeSearch:
         return root_node
     def select_move(self,node,mode="exploit",temperature=1):
         visits = [(k,v.total_visits_N) for k,v in node.children.items()]
+        # exploit: select the action with the most visits
+        # explore: select the action with the probability of the visits
         if mode=="exploit":
             action_index = max(visits,key=lambda t: t[1])[0]
-        if mode=="explore":
+        elif mode=="explore":
             visit_options = [k for k,v in node.children.items()]
             probs = [v.total_visits_N**(1/temperature) for k,v in node.children.items()]
             probs = [t/sum(probs) for t in probs]

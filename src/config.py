@@ -10,4 +10,6 @@ class Config:
     BEST_MODEL = "{}_best_model.pt"
     LOGDIR = "output_tictac/logs"
     EVAL_GAMES = 40
-    ACTION_SIZE = 9
+    ACTION_SIZE = 9 # number of possible actions . TODO: make this dynamic for N by N board
+    NUM_GAMES = 100000
+    NUM_SIMULATIONS = 800
