@@ -1,7 +1,7 @@
 import numpy as np
 import os
 from config import Config as cfg
-from game import TicTacToe,Connect2
+from game import TicTacToe
 from mcts import MonteCarloTreeSearch
 from dataset import TrainingDataset
 from tqdm import tqdm
