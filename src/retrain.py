@@ -7,7 +7,7 @@ import numpy as np
 from model import NeuralNetwork
 from dataset import TrainingDataset
 from config import Config as cfg
-from game import TicTacToe,Connect2
+from game import TicTacToe
 from glob import glob
 import pandas as pd
 from value_policy_function import ValuePolicyNetwork
