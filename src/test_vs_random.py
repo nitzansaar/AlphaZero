@@ -119,8 +119,8 @@ def main():
     random_player = RandomPlayer(game)
     
     # Test parameters
-    num_games = 2000
-    num_simulations = 800  # Reduced from 1600 for faster testing
+    num_games = cfg.NUM_GAMES
+    num_simulations = cfg.NUM_SIMULATIONS
     
     print(f"\nTesting AlphaZero bot vs Random Player")
     print(f"Total games: {num_games}")

@@ -112,9 +112,8 @@ class Trainer:
         logpath = os.path.join(cfg.LOGDIR,"{}_history.csv".format(self.latest_file_number+1))
         history.to_csv(logpath,index=None)
         print(history)
-    def evaluate(self):
+    # def evaluate(self):
         game = TicTacToe()
-#         game = Connect2()
         model_path_old = os.path.join(cfg.SAVE_MODEL_PATH,cfg.BEST_MODEL.format(self.latest_file_number))
         vpn_old = ValuePolicyNetwork(model_path_old)
         policy_value_network_old = vpn_old.get_vp
@@ -189,4 +188,4 @@ if __name__=="__main__":
     trainer = Trainer()
     trainer.train()
     
-    trainer.evaluate()
+    # trainer.evaluate()

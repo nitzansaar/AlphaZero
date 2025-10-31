@@ -1,16 +1,9 @@
 from config import Config as cfg
 
-import os
 import torch
-from torch import nn
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
-import numpy as np
-
 from model import NeuralNetwork
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# model = NeuralNetwork().to(device)
 class ValuePolicyNetwork:
     def __init__(self,path=None):
         self.model = NeuralNetwork().to(device)

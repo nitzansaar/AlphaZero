@@ -1,13 +1,8 @@
 import numpy as np
-import pandas as pd
-import os
-import math
-from copy import copy
-from tqdm import tqdm
 class TicTacToe:
     def __init__(self):
         
-        self.state = np.zeros(9)
+        self.state = np.zeros(9) # initial state is all zeros
         
     def get_valid_moves(self,state):
         valid_actions = np.zeros(9)
@@ -45,13 +40,9 @@ class TicTacToe:
             if winner in [-1,1]:
 #                 print(f"player {-1*player} won")
                 return -1*player
-#             print("Draw")
+            # print("Draw")
             return 0
         return winner
     def play(self,board_state,player,action_index):
         board_state[action_index] = player
         return board_state,self.win_or_draw(board_state),-1*player
-        
-win_indices = [[0,1],\
-                [1,2],\
-                [2,3]]
