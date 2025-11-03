@@ -2,10 +2,8 @@ import os
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
-import numpy as np
 from model import NeuralNetwork
-from dataset import TrainingDataset
+from dataset import TrainingDataset, TicTacToeDataset
 from config import Config as cfg
 from game import TicTacToe
 from glob import glob
@@ -47,14 +45,14 @@ class Trainer:
         ds = TrainingDataset()
         save_path = os.path.join(cfg.SAVE_PICKLES,cfg.DATASET_PATH)
         ds.load(save_path)
-        return ds.retreive_test_train_data()
+        # Return all data as training data, empty eval dataset
+        all_data = TicTacToeDataset(ds.training_dataset)
+        empty_eval = TicTacToeDataset([])
+        return all_data, empty_eval
     def train(self):
         train_dataloader = DataLoader(self.train_data,\
                         batch_size=cfg.BATCH_SIZE,\
                         shuffle=True)
-        eval_dataloader = DataLoader(self.eval_data,\
-                                batch_size=cfg.BATCH_SIZE,\
-                                shuffle=False)
         value_criterion = nn.MSELoss().to(device)
         policy_criterion = nn.CrossEntropyLoss().to(device)
         optimizer = torch.optim.Adam(self.model.parameters())
@@ -83,36 +81,20 @@ class Trainer:
                 optimizer.step()
             train_loss = train_loss/len(train_dataloader)
 
-            self.model.eval()
-            val_loss = 0
-            with torch.no_grad():
-                for i, (X,v,p) in enumerate(eval_dataloader):
-                    X = X.to(device)
-                    v = v.to(device)
-                    p = p.to(device)
-
-                    yv,yp = self.model(X)
-                    vloss = value_criterion(yv,v)
-                    aloss = policy_criterion(yp,p)
-
-                    loss = vloss + aloss
-                    val_loss+=loss.item()
-                val_loss = val_loss/len(eval_dataloader)
-                lr_scheduler.step(val_loss)
-                if val_loss<best_loss:
-                        best_loss = val_loss
-                        
-                        savepath = os.path.join(cfg.SAVE_MODEL_PATH,cfg.BEST_MODEL.format(self.latest_file_number+1))
-                        torch.save(self.model.state_dict(), savepath)
-                        print("Saving Model.....BL",savepath)
-            print(f"Epoch {epoch}:: Train Loss: {train_loss}; Eval Loss: {val_loss};")
-            history.append([epoch,train_loss,val_loss])
+            # Save model based on training loss
+            lr_scheduler.step(train_loss)
+            if train_loss < best_loss:
+                best_loss = train_loss
+                savepath = os.path.join(cfg.SAVE_MODEL_PATH,cfg.BEST_MODEL.format(self.latest_file_number+1))
+                torch.save(self.model.state_dict(), savepath)
+                print("Saving Model.....BL",savepath)
+            print(f"Epoch {epoch}:: Train Loss: {train_loss};")
+            history.append([epoch,train_loss])
         
-        history = pd.DataFrame(history,columns=["Epoch","Tr_Loss","Eval_Loss"])
+        history = pd.DataFrame(history,columns=["Epoch","Tr_Loss"])
         logpath = os.path.join(cfg.LOGDIR,"{}_history.csv".format(self.latest_file_number+1))
         history.to_csv(logpath,index=None)
         print(history)
-    # def evaluate(self):
         game = TicTacToe()
         model_path_old = os.path.join(cfg.SAVE_MODEL_PATH,cfg.BEST_MODEL.format(self.latest_file_number))
         vpn_old = ValuePolicyNetwork(model_path_old)
@@ -131,8 +113,6 @@ class Trainer:
             player=1
             node = root_node
             while game.win_or_draw(node.state)==None:
-        #         print("{}".format(node.state.reshape(3,3)))
-        #         print("player: {}".format(player))
                 if player ==1:
                     node = mtcs.run_simulation(root_node=node,num_simulations=1600,player=player)
                     action,node,action_probs = mtcs.select_move(node=node,mode="exploit",temperature=1)
@@ -140,11 +120,7 @@ class Trainer:
                     node = mtcs_old.run_simulation(root_node=node,num_simulations=1600,player=player)
                     action,node,action_probs = mtcs_old.select_move(node=node,mode="exploit",temperature=1)
                 player = -1*player
-
-        #     print("{}".format(node.state.reshape(3,3)))
-        #     print("player: {}".format(player))
             winner = game.get_reward_for_next_player(node.state,player)
-        #     print("winner : {}".format(winner))
             if winner==1:
                 results.append([game_number,winner,"model"])
             if winner==0:
@@ -161,8 +137,6 @@ class Trainer:
             player=1
             node = root_node
             while game.win_or_draw(node.state)==None:
-        #         print("{}".format(node.state.reshape(3,3)))
-        #         print("player: {}".format(player))
                 if player ==1:
                     node = mtcs_old.run_simulation(root_node=node,num_simulations=1600,player=player)
                     action,node,action_probs = mtcs_old.select_move(node=node,mode="exploit",temperature=1)
@@ -170,10 +144,7 @@ class Trainer:
                     node = mtcs.run_simulation(root_node=node,num_simulations=1600,player=player)
                     action,node,action_probs = mtcs.select_move(node=node,mode="exploit",temperature=1)
                 player = -1*player
-        #     print("{}".format(node.state.reshape(3,3)))
-        #     print("player: {}".format(player))
             winner = game.get_reward_for_next_player(node.state,player)
-        #     print("winner : {}".format(winner))
             if winner==1:
                 results.append([game_number,winner,"old_model"])
             if winner==0:
@@ -187,5 +158,3 @@ class Trainer:
 if __name__=="__main__":
     trainer = Trainer()
     trainer.train()
-    
-    # trainer.evaluate()
