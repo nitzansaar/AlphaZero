@@ -1,5 +1,4 @@
 class Config:
-    TRAIN_TEST_SPLIT = 0.7
     BATCH_SIZE = 100
     EPOCHS = 1000
     SAVE_MODEL_PATH = "output_tictac/models"
@@ -11,5 +10,5 @@ class Config:
     LOGDIR = "output_tictac/logs"
     EVAL_GAMES = 40
     ACTION_SIZE = 9 # number of possible actions . TODO: make this dynamic for N by N board
-    NUM_GAMES = 100000
+    NUM_GAMES = 1000
     NUM_SIMULATIONS = 800

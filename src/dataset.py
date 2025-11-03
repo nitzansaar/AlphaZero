@@ -51,7 +51,7 @@ class TrainingDataset:
     def retreive_test_train_data(self): 
         data = self.training_dataset
         num_samples = len(data)
-        train_idx = np.random.choice(np.arange(num_samples),int(cfg.TRAIN_TEST_SPLIT*num_samples),replace=False)
+        train_idx = np.random.choice(np.arange(num_samples),int(num_samples),replace=False)
         train_idx_set = set(train_idx)
         val_idx = [t for t in range(num_samples) if t not in train_idx_set]
         train_data = [data[i] for i in train_idx]

@@ -7,8 +7,8 @@ from tqdm import tqdm
 from value_policy_function import ValuePolicyNetwork
 from copy import copy
 
-os.makedirs(cfg.SAVE_PICKLES,exist_ok=True)
-save_path = os.path.join(cfg.SAVE_PICKLES,cfg.DATASET_PATH)
+os.makedirs(cfg.SAVE_PICKLES, exist_ok=True) # create the save path if it doesn't exist
+save_path = os.path.join(cfg.SAVE_PICKLES, cfg.DATASET_PATH)
 
 
 game = TicTacToe()
@@ -24,23 +24,17 @@ for game_number in tqdm(range(num_games),total=num_games):
     player = 1
     node = root_node
     dataset = []
-    while game.win_or_draw(node.state)==None: # while the game is not over
-#         print("{}".format(node.state.reshape(3,3)))
-#         print("player: {}".format(player))
+    while game.win_or_draw(node.state) == None: # while the game is not over
         parent_state = copy(node.state)
         node = mcts.run_simulation(root_node=node,num_simulations=1600,player=player)
-        action,node,action_probs = mcts.select_move(node=node,mode="explore",temperature=1)
-        dataset.append([parent_state,action_probs,player])
-        player = -1*player
-
-#     print("{}".format(node.state.reshape(3,3)))
-#     print("player: {}".format(player))
+        action, node, action_probs = mcts.select_move(node=node, mode="explore", temperature=1) # select the action with the probability of the visits
+        dataset.append([parent_state, action_probs, player])
+        player = -1 * player
     winner = game.get_reward_for_next_player(node.state,player)
-#     print("winner : {}".format(winner))
     training_dataset.add_game_to_training_dataset(dataset,winner)
-    if game_number%500 == 0:
+    if game_number % 500 == 0: # save the training dataset every 500 games
         training_dataset.save(save_path) 
         print("saving....",game_number)
 
     
-training_dataset.save(save_path)    
+training_dataset.save(save_path)
