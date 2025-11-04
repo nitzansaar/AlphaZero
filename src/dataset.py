@@ -10,12 +10,21 @@ class TicTacToeDataset:
     
     def __len__(self):
         return len(self.data)
+    
     def __getitem__(self,index):
         datapoint = self.data[index]
-        state = datapoint[0]
-        v = datapoint[3]
-        p = datapoint[1]
-        return torch.tensor(state,dtype=torch.float),torch.tensor(v,dtype=torch.float),torch.tensor(p,dtype=torch.float)
+        state_flat = datapoint[0]  # Flat array of 9 values
+        player = datapoint[2]      # Player (1 or -1)
+        v = datapoint[3]           # Value target
+        p = datapoint[1]           # Policy target
+        
+        # Convert flat state to canonical 3-plane representation
+        from game import board_to_canonical_3d
+        state_canonical = board_to_canonical_3d(state_flat, player)
+        
+        return (torch.tensor(state_canonical, dtype=torch.float),
+                torch.tensor(v, dtype=torch.float),
+                torch.tensor(p, dtype=torch.float))
 
 class TrainingDataset:
     def __init__(self):

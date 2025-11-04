@@ -22,15 +22,29 @@ class Trainer:
         self.modelpath=modelpath
         self.latest_file_number = -1
         if modelpath:
-            self.model.load_state_dict(torch.load(modelpath))
+            try:
+                self.model.load_state_dict(torch.load(modelpath, map_location=device))
+                print(f"Loaded model from {modelpath}")
+            except RuntimeError as e:
+                print(f"Warning: Could not load model from {modelpath}")
+                print(f"Error: {e}")
+                print("Starting with new randomly initialized model")
         else:
             all_models = glob(cfg.SAVE_MODEL_PATH + "/*.pt")
             if len(all_models)>0:
-                files = [int(os.path.basename(f).split("_")[0]) for f in all_models]
-                self.latest_file_number = max(files)
-                latest_file = os.path.join(cfg.SAVE_MODEL_PATH,cfg.BEST_MODEL.format(self.latest_file_number))
-                print("latest_model ...{}".format(latest_file))                
-                self.model.load_state_dict(torch.load(latest_file))
+                files = [int(os.path.basename(f).split("_")[0]) for f in all_models if os.path.basename(f).split("_")[0].isdigit()]
+                if files:
+                    self.latest_file_number = max(files)
+                    latest_file = os.path.join(cfg.SAVE_MODEL_PATH,cfg.BEST_MODEL.format(self.latest_file_number))
+                    print("Attempting to load latest model: {}".format(latest_file))
+                    try:
+                        self.model.load_state_dict(torch.load(latest_file, map_location=device))
+                        print("Successfully loaded model from {}".format(latest_file))
+                    except RuntimeError as e:
+                        print("Warning: Could not load model (architecture mismatch)")
+                        print("This is expected if the model was trained with old architecture.")
+                        print("Starting with new randomly initialized model")
+                        self.latest_file_number = -1  # Start fresh
             else:
                 savepath = os.path.join(cfg.SAVE_MODEL_PATH,cfg.BEST_MODEL.format(self.latest_file_number))
                 torch.save(self.model.state_dict(), savepath)
