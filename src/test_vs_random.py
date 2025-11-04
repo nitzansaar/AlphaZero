@@ -4,6 +4,7 @@ from tqdm import tqdm
 import pandas as pd
 from glob import glob
 import torch
+import json
 from config import Config as cfg
 from game import TicTacToe
 from mcts import MonteCarloTreeSearch
@@ -12,6 +13,99 @@ from model import NeuralNetwork
 import matplotlib.pyplot as plt
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
+
+def format_board_state(state):
+    """
+    Convert board state to a readable 2D representation.
+    Returns a 4x4 grid with 'X' for player 1, 'O' for player -1, '.' for empty
+    """
+    board_2d = state.reshape(4, 4)
+    formatted = []
+    for row in board_2d:
+        formatted_row = []
+        for cell in row:
+            if cell == 1:
+                formatted_row.append('X')
+            elif cell == -1:
+                formatted_row.append('O')
+            else:
+                formatted_row.append('.')
+        formatted.append(formatted_row)
+    return formatted
+
+def format_board_as_string(board_state):
+    """
+    Format the board state as a readable 4x4 grid string.
+    Args:
+        board_state: List of lists representing the board (from format_board_state)
+    Returns:
+        Multi-line string showing the board in a formatted way
+    """
+    lines = []
+    for i, row in enumerate(board_state):
+        row_str = " | ".join(row)
+        lines.append(f"  {row_str}")
+        if i < len(board_state) - 1:
+            lines.append("  " + "-" * 13)  # Separator between rows
+    return "\n".join(lines)
+
+def format_policy_probs(policy_probs, action_index=None):
+    """
+    Format policy probabilities as a 4x4 grid string.
+    Args:
+        policy_probs: List of 16 probabilities
+        action_index: Optional action index to highlight
+    Returns:
+        Multi-line string showing the policy probabilities
+    """
+    # Reshape to 4x4
+    policy_grid = np.array(policy_probs).reshape(4, 4)
+    lines = []
+    for i in range(4):
+        row_strs = []
+        for j in range(4):
+            idx = i * 4 + j
+            prob = policy_grid[i, j]
+            if action_index is not None and idx == action_index:
+                row_strs.append(f"{prob:.3f}*")  # Mark selected move
+            else:
+                row_strs.append(f"{prob:.3f}")
+        lines.append("  " + " | ".join(row_strs))
+        if i < 3:
+            lines.append("  " + "-" * 35)  # Separator between rows
+    return "\n".join(lines)
+
+def get_top_moves(policy_probs, top_k=5):
+    """
+    Get top k moves with their probabilities and coordinates.
+    Returns list of tuples: (action_index, prob, coords)
+    """
+    indices = np.argsort(policy_probs)[::-1][:top_k]
+    return [(int(idx), float(policy_probs[idx]), action_index_to_coords(idx)) 
+            for idx in indices if policy_probs[idx] > 0]
+
+def action_index_to_coords(action_index):
+    """Convert action index to row, col coordinates"""
+    row = action_index // 4
+    col = action_index % 4
+    return (row, col)
+
+def convert_numpy_types(obj):
+    """Recursively convert numpy types to native Python types for JSON serialization"""
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(convert_numpy_types(item) for item in obj)
+    else:
+        return obj
 
 class RandomPlayer:
     """A player that makes completely random moves"""
@@ -32,78 +126,190 @@ class RandomPlayer:
 def play_game_bot_first(game, mcts, random_player, num_simulations=1600):
     """
     Play a single game with the bot going first (player 1)
-    Returns: 1 if bot wins, -1 if random wins, 0 if draw
+    Returns: (result, game_history) where result is 1 if bot wins, -1 if random wins, 0 if draw
     """
     from mcts import Node
     
     player = 1
-    state = np.zeros(cfg.ACTION_SIZE)
+    state = np.zeros(cfg.ACTION_SIZE)  # Canonicalized state for MCTS
+    absolute_state = np.zeros(cfg.ACTION_SIZE)  # Absolute state for display (player 1 = 1, player -1 = -1)
+    game_history = []
+    move_number = 0
     
-    while game.win_or_draw(state) == None:
+    # Record initial state
+    board_state_formatted = format_board_state(absolute_state.copy())
+    game_history.append({
+        'move': move_number,
+        'player': None,
+        'action': None,
+        'action_coords': None,
+        'board_state': board_state_formatted,
+        'board_state_formatted': format_board_as_string(board_state_formatted),
+        'board_state_flat': [float(x) for x in absolute_state.copy().tolist()]
+    })
+    
+    while game.win_or_draw(absolute_state) == None:
+        move_number += 1
         if player == 1:  # Bot's turn
             # Create fresh node for bot
             node = Node(prior_prob=0, player=player, action_index=None)
             node.set_state(state.copy())
             node = mcts.run_simulation(root_node=node, num_simulations=num_simulations, player=player)
             action, node, action_probs = mcts.select_move(node=node, mode="exploit", temperature=1)
-            # Update state
+            action_index = np.argmax(action)
+            # Update canonicalized state
             state = node.state.copy()
+            # Update absolute state (player 1 plays)
+            absolute_state[action_index] = 1
+            
+            # Convert action_probs to list and get top moves
+            policy_probs_list = [float(p) for p in action_probs]
+            top_moves = get_top_moves(policy_probs_list, top_k=5)
+            
+            # Record bot move
+            board_state_formatted = format_board_state(absolute_state.copy())
+            game_history.append({
+                'move': move_number,
+                'player': 'bot',
+                'player_number': 1,
+                'action_index': int(action_index),
+                'action_coords': tuple(action_index_to_coords(action_index)),
+                'board_state': board_state_formatted,
+                'board_state_formatted': format_board_as_string(board_state_formatted),
+                'board_state_flat': [float(x) for x in absolute_state.copy().tolist()],
+                'policy_probs': policy_probs_list,
+                'policy_probs_formatted': format_policy_probs(policy_probs_list, action_index),
+                'top_moves': top_moves
+            })
         else:  # Random player's turn
             action = random_player.get_action(state)
             if action is None:
                 break
-            # Apply random action to state
+            # Apply random action to canonicalized state
             action_index = np.argmax(action)
             state = game.get_next_state_from_next_player_prespective(state, action, player)
+            # Update absolute state (player -1 plays)
+            absolute_state[action_index] = -1
+            
+            # Record random player move
+            board_state_formatted = format_board_state(absolute_state.copy())
+            game_history.append({
+                'move': move_number,
+                'player': 'random',
+                'player_number': -1,
+                'action_index': int(action_index),
+                'action_coords': tuple(action_index_to_coords(action_index)),
+                'board_state': board_state_formatted,
+                'board_state_formatted': format_board_as_string(board_state_formatted),
+                'board_state_flat': [float(x) for x in absolute_state.copy().tolist()]
+            })
         
         player = -1 * player
     
     # Determine winner from bot's perspective (bot is player 1)
-    winner = game.get_reward_for_next_player(state, player)
+    winner = game.get_reward_for_next_player(absolute_state, player)
     if winner == 1:  # Player 1 (bot) won
-        return 1
+        result = 1
     elif winner == -1:  # Player -1 (random) won
-        return -1
+        result = -1
     else:  # Draw
-        return 0
+        result = 0
+    
+    return result, game_history
 
 def play_game_random_first(game, mcts, random_player, num_simulations=1600):
     """
     Play a single game with random player going first (player 1), bot is player -1
-    Returns: 1 if bot wins, -1 if random wins, 0 if draw
+    Returns: (result, game_history) where result is 1 if bot wins, -1 if random wins, 0 if draw
     """
     from mcts import Node
     
     player = 1
-    state = np.zeros(cfg.ACTION_SIZE)
+    state = np.zeros(cfg.ACTION_SIZE)  # Canonicalized state for MCTS
+    absolute_state = np.zeros(cfg.ACTION_SIZE)  # Absolute state for display (player 1 = 1, player -1 = -1)
+    game_history = []
+    move_number = 0
     
-    while game.win_or_draw(state) == None:
+    # Record initial state
+    board_state_formatted = format_board_state(absolute_state.copy())
+    game_history.append({
+        'move': move_number,
+        'player': None,
+        'action': None,
+        'action_coords': None,
+        'board_state': board_state_formatted,
+        'board_state_formatted': format_board_as_string(board_state_formatted),
+        'board_state_flat': [float(x) for x in absolute_state.copy().tolist()]
+    })
+    
+    while game.win_or_draw(absolute_state) == None:
+        move_number += 1
         if player == -1:  # Bot's turn
             # Create fresh node for bot
             node = Node(prior_prob=0, player=player, action_index=None)
             node.set_state(state.copy())
             node = mcts.run_simulation(root_node=node, num_simulations=num_simulations, player=player)
             action, node, action_probs = mcts.select_move(node=node, mode="exploit", temperature=1)
-            # Update state
+            action_index = np.argmax(action)
+            # Update canonicalized state
             state = node.state.copy()
+            # Update absolute state (player -1 plays)
+            absolute_state[action_index] = -1
+            
+            # Convert action_probs to list and get top moves
+            policy_probs_list = [float(p) for p in action_probs]
+            top_moves = get_top_moves(policy_probs_list, top_k=5)
+            
+            # Record bot move
+            board_state_formatted = format_board_state(absolute_state.copy())
+            game_history.append({
+                'move': move_number,
+                'player': 'bot',
+                'player_number': -1,
+                'action_index': int(action_index),
+                'action_coords': tuple(action_index_to_coords(action_index)),
+                'board_state': board_state_formatted,
+                'board_state_formatted': format_board_as_string(board_state_formatted),
+                'board_state_flat': [float(x) for x in absolute_state.copy().tolist()],
+                'policy_probs': policy_probs_list,
+                'policy_probs_formatted': format_policy_probs(policy_probs_list, action_index),
+                'top_moves': top_moves
+            })
         else:  # Random player's turn
             action = random_player.get_action(state)
             if action is None:
                 break
-            # Apply random action to state
+            # Apply random action to canonicalized state
             action_index = np.argmax(action)
             state = game.get_next_state_from_next_player_prespective(state, action, player)
+            # Update absolute state (player 1 plays)
+            absolute_state[action_index] = 1
+            
+            # Record random player move
+            board_state_formatted = format_board_state(absolute_state.copy())
+            game_history.append({
+                'move': move_number,
+                'player': 'random',
+                'player_number': 1,
+                'action_index': int(action_index),
+                'action_coords': tuple(action_index_to_coords(action_index)),
+                'board_state': board_state_formatted,
+                'board_state_formatted': format_board_as_string(board_state_formatted),
+                'board_state_flat': [float(x) for x in absolute_state.copy().tolist()]
+            })
         
         player = -1 * player
     
     # Determine winner from bot's perspective (bot is player -1)
-    winner = game.get_reward_for_next_player(state, player)
+    winner = game.get_reward_for_next_player(absolute_state, player)
     if winner == -1:  # Player -1 (bot) won
-        return 1
+        result = 1
     elif winner == 1:  # Player 1 (random) won
-        return -1
+        result = -1
     else:  # Draw
-        return 0
+        result = 0
+    
+    return result, game_history
 
 def main():
     # Initialize game
@@ -195,29 +401,52 @@ def main():
     print("=" * 60)
     
     results = []
+    all_games_history = []
     
     # Play half the games with bot going first
     print("\n[1/2] Bot playing as Player 1 (X - goes first):")
     for game_num in tqdm(range(num_games // 2), total=num_games // 2):
-        result = play_game_bot_first(game, mcts, random_player, num_simulations)
+        result, game_history = play_game_bot_first(game, mcts, random_player, num_simulations)
+        outcome = 'bot_win' if result == 1 else ('draw' if result == 0 else 'random_win')
+        
         results.append({
             'game_number': game_num,
             'bot_position': 'first',
             'bot_player': 1,
             'result': result,
-            'outcome': 'bot_win' if result == 1 else ('draw' if result == 0 else 'random_win')
+            'outcome': outcome
+        })
+        
+        all_games_history.append({
+            'game_number': game_num,
+            'bot_position': 'first',
+            'bot_player': 1,
+            'result': result,
+            'outcome': outcome,
+            'moves': game_history
         })
     
     # Play half the games with random going first
     print("\n[2/2] Bot playing as Player -1 (O - goes second):")
     for game_num in tqdm(range(num_games // 2, num_games), total=num_games // 2):
-        result = play_game_random_first(game, mcts, random_player, num_simulations)
+        result, game_history = play_game_random_first(game, mcts, random_player, num_simulations)
+        outcome = 'bot_win' if result == 1 else ('draw' if result == 0 else 'random_win')
+        
         results.append({
             'game_number': game_num,
             'bot_position': 'second',
             'bot_player': -1,
             'result': result,
-            'outcome': 'bot_win' if result == 1 else ('draw' if result == 0 else 'random_win')
+            'outcome': outcome
+        })
+        
+        all_games_history.append({
+            'game_number': game_num,
+            'bot_position': 'second',
+            'bot_player': -1,
+            'result': result,
+            'outcome': outcome,
+            'moves': game_history
         })
     
     # Create DataFrame
@@ -265,6 +494,92 @@ def main():
     output_file = os.path.join(output_dir, "bot_vs_random_results.csv")
     df_results.to_csv(output_file, index=False)
     print(f"\nDetailed results saved to: {output_file}")
+    
+    # Save game histories to JSON file
+    games_json_file = os.path.join(output_dir, "bot_vs_random_games.json")
+    # Convert numpy types to native Python types for JSON serialization
+    json_data = {
+        'metadata': {
+            'total_games': int(num_games),
+            'num_simulations': int(num_simulations),
+            'bot_position_first': 'Player 1 (X)',
+            'bot_position_second': 'Player -1 (O)'
+        },
+        'games': convert_numpy_types(all_games_history)
+    }
+    with open(games_json_file, 'w') as f:
+        json.dump(json_data, f, indent=2)
+    print(f"Game histories saved to: {games_json_file}")
+    
+    # Save a readable text version of games
+    games_text_file = os.path.join(output_dir, "bot_vs_random_games_readable.txt")
+    with open(games_text_file, 'w') as f:
+        f.write("=" * 80 + "\n")
+        f.write("AlphaZero Bot vs Random Player - Game Histories\n")
+        f.write("=" * 80 + "\n\n")
+        f.write(f"Total Games: {num_games}\n")
+        f.write(f"MCTS Simulations: {num_simulations} per move\n\n")
+        
+        for game_data in all_games_history:
+            game_num = game_data['game_number']
+            bot_pos = game_data['bot_position']
+            outcome = game_data['outcome']
+            result = game_data['result']
+            
+            f.write("-" * 80 + "\n")
+            f.write(f"Game {game_num} | Bot Position: {bot_pos} | Outcome: {outcome} ")
+            f.write(f"(Result: {result})\n")
+            f.write("-" * 80 + "\n")
+            
+            for move_data in game_data['moves']:
+                move_num = move_data['move']
+                player = move_data['player']
+                action_coords = move_data['action_coords']
+                board_state = move_data['board_state']
+                
+                if move_num == 0:
+                    f.write(f"\nInitial Board:\n")
+                else:
+                    if action_coords:
+                        f.write(f"\nMove {move_num}: {player.upper()} plays at ({action_coords[0]}, {action_coords[1]})\n")
+                    else:
+                        f.write(f"\nMove {move_num}: {player.upper()}\n")
+                
+                # Print board in readable format
+                for row in board_state:
+                    f.write("  " + " ".join(row) + "\n")
+                
+                # Print policy probabilities for bot moves
+                if player == 'bot' and 'policy_probs_formatted' in move_data:
+                    f.write(f"\nBot's Policy Probabilities (MCTS visit-based):\n")
+                    f.write(move_data['policy_probs_formatted'])
+                    f.write("\n")
+                    if 'top_moves' in move_data and move_data['top_moves']:
+                        f.write("Top 5 moves considered:\n")
+                        for idx, (action_idx, prob, (r, c)) in enumerate(move_data['top_moves'], 1):
+                            marker = " <- SELECTED" if action_idx == move_data['action_index'] else ""
+                            f.write(f"  {idx}. Position ({r}, {c}): {prob:.3f}{marker}\n")
+                    f.write("\n")
+                
+            f.write("\n")
+            # Determine final winner
+            final_state = game_data['moves'][-1]['board_state']
+            winner = None
+            for row in final_state:
+                if row.count('X') == 4:
+                    winner = 'X (Player 1)'
+                    break
+                if row.count('O') == 4:
+                    winner = 'O (Player -1)'
+                    break
+            
+            if winner:
+                f.write(f"Winner: {winner}\n")
+            elif all('.' not in row for row in final_state):
+                f.write("Result: Draw\n")
+            f.write("\n")
+    
+    print(f"Readable game histories saved to: {games_text_file}")
 
     # Create visualizations
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
