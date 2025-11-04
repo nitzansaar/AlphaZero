@@ -8,24 +8,39 @@ print(f"Using {device} device")
 class NeuralNetwork(nn.Module):
     def __init__(self):
         super(NeuralNetwork, self).__init__()
-        self.flatten = nn.Flatten()
-        self.linear_relu_stack = nn.Sequential(
-            nn.Linear(cfg.ACTION_SIZE,64),
-            nn.ReLU(),
-            nn.Linear(64, 32),
-        )
-        self.value_network = nn.Sequential(
-            nn.ReLU(),
-            nn.Linear(32,1)
-        )
-        self.policy_network = nn.Sequential(
-            nn.ReLU(),
-            nn.Linear(32,cfg.ACTION_SIZE)
-        )
+        # Convolutional layers for spatial feature extraction
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+        
+        # Shared fully connected layer
+        # Input size: 128 channels * 3 * 3 = 1152
+        self.fc_shared = nn.Linear(128 * 3 * 3, 256)
+        
+        # Value head
+        self.fc_value1 = nn.Linear(256, 64)
+        self.fc_value2 = nn.Linear(64, 1)
+        
+        # Policy head
+        self.fc_policy = nn.Linear(256, cfg.ACTION_SIZE)
+        
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(0.2)
 
     def forward(self, x):
-        x = self.flatten(x)
-        logits = self.linear_relu_stack(x)
-        value = self.value_network(logits)
-        actions = self.policy_network(logits)
-        return value,actions
+        # x shape: (batch, 3, 3, 3) - 3 planes: current player, opponent, empty
+        # Conv layers
+        x = self.relu(self.conv1(x))  # (batch, 64, 3, 3)
+        x = self.relu(self.conv2(x))  # (batch, 128, 3, 3)
+        
+        # Flatten for fully connected
+        x = x.view(-1, 128 * 3 * 3)  # (batch, 1152)
+        x = self.dropout(self.relu(self.fc_shared(x)))  # (batch, 256)
+        
+        # Value head
+        value = self.relu(self.fc_value1(x))  # (batch, 64)
+        value = torch.tanh(self.fc_value2(value))  # (batch, 1) in [-1, 1]
+        
+        # Policy head
+        policy = self.fc_policy(x)  # (batch, 9)
+        
+        return value, policy

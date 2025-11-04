@@ -102,7 +102,7 @@ class MonteCarloTreeSearch:
     def run_simulation(self, root_node, num_simulations=1600, player=1): # run the simulation for the given number of simulations
         root_state = root_node.state
         next_player = -1 * player # switch player
-        value, action_probs = self.policy_value_network(root_state) #call the nn
+        value, action_probs = self.policy_value_network(root_state, player) #call the nn with player info
         valid_moves = self.game.get_valid_moves(root_state)
         action_probs = action_probs * valid_moves
         root_node.expand(action_probs=action_probs,player=next_player,parent=root_node)
@@ -121,7 +121,7 @@ class MonteCarloTreeSearch:
             leaf_node_state = self.game.get_next_state_from_next_player_prespective(parent_node.state, action, player) # get the next state from the next player's perspective
             leaf_node.set_state(leaf_node_state)
 
-            value,action_probs = self.policy_value_network(leaf_node_state)
+            value,action_probs = self.policy_value_network(leaf_node_state, leaf_node.player) # pass player for canonical representation
             winner = self.game.get_reward_for_next_player(leaf_node_state,leaf_node.player)
             
             if winner == None:

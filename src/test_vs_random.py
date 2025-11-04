@@ -2,11 +2,16 @@ import os
 import numpy as np
 from tqdm import tqdm
 import pandas as pd
+from glob import glob
+import torch
 from config import Config as cfg
 from game import TicTacToe
 from mcts import MonteCarloTreeSearch
 from value_policy_function import ValuePolicyNetwork
+from model import NeuralNetwork
 import matplotlib.pyplot as plt
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 class RandomPlayer:
     """A player that makes completely random moves"""
@@ -105,10 +110,71 @@ def main():
     game = TicTacToe()
     
     # Load the latest trained model
-    model_path = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(1))
-    if not os.path.exists(model_path):
-        # Try loading model 0 if model 1 doesn't exist
-        model_path = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(0))
+    # Find the most recently modified model file (better than highest number)
+    all_models = glob(os.path.join(cfg.SAVE_MODEL_PATH, "*_best_model.pt"))
+    model_path = None
+    
+    if all_models:
+        # Get modification time for each model
+        models_with_time = []
+        for f in all_models:
+            try:
+                mtime = os.path.getmtime(f)
+                models_with_time.append((mtime, f))
+            except OSError:
+                continue
+        
+        if models_with_time:
+            # Sort by modification time (most recent first)
+            models_with_time.sort(reverse=True)
+            
+            # Try loading models starting from most recent until one works
+            for mtime, model_file in models_with_time:
+                try:
+                    # Quick test: try to load state dict to check architecture
+                    test_model = NeuralNetwork().to(device)
+                    test_state = torch.load(model_file, map_location=device)
+                    test_model.load_state_dict(test_state)
+                    # If we get here, architecture matches!
+                    model_path = model_file
+                    model_name = os.path.basename(model_file)
+                    print(f"Found {len(all_models)} model(s), using most recent compatible: {model_name}")
+                    break
+                except (RuntimeError, FileNotFoundError) as e:
+                    # Architecture mismatch or file error, try next
+                    continue
+                finally:
+                    # Clean up test model
+                    del test_model
+                    if 'test_state' in locals():
+                        del test_state
+                    torch.cuda.empty_cache() if torch.cuda.is_available() else None
+            
+            # If no compatible model found, fall back to highest number
+            if model_path is None:
+                files_with_numbers = []
+                for f in all_models:
+                    basename = os.path.basename(f)
+                    if "_best_model.pt" in basename:
+                        try:
+                            num = int(basename.split("_")[0])
+                            files_with_numbers.append((num, f))
+                        except ValueError:
+                            continue
+                
+                if files_with_numbers:
+                    latest_num, model_path = max(files_with_numbers, key=lambda x: x[0])
+                    print(f"Found {len(all_models)} model(s), using highest numbered: model {latest_num}")
+        else:
+            # Fallback: try numbered models
+            model_path = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(1))
+            if not os.path.exists(model_path):
+                model_path = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(0))
+    else:
+        # No models found, try default
+        model_path = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(1))
+        if not os.path.exists(model_path):
+            model_path = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(0))
     
     print(f"Loading model from: {model_path}")
     vpn = ValuePolicyNetwork(model_path)
