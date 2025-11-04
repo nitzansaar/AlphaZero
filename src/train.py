@@ -19,38 +19,14 @@ class Trainer:
         os.makedirs(cfg.SAVE_MODEL_PATH,exist_ok=True)
         os.makedirs(cfg.LOGDIR,exist_ok=True)
         self.model = NeuralNetwork().to(device)
-        self.modelpath=modelpath
         self.latest_file_number = -1
-        if modelpath:
-            try:
-                self.model.load_state_dict(torch.load(modelpath, map_location=device))
-                print(f"Loaded model from {modelpath}")
-            except RuntimeError as e:
-                print(f"Warning: Could not load model from {modelpath}")
-                print(f"Error: {e}")
-                print("Starting with new randomly initialized model")
-        else:
-            all_models = glob(cfg.SAVE_MODEL_PATH + "/*.pt")
-            if len(all_models)>0:
-                files = [int(os.path.basename(f).split("_")[0]) for f in all_models if os.path.basename(f).split("_")[0].isdigit()]
-                if files:
-                    self.latest_file_number = max(files)
-                    latest_file = os.path.join(cfg.SAVE_MODEL_PATH,cfg.BEST_MODEL.format(self.latest_file_number))
-                    print("Attempting to load latest model: {}".format(latest_file))
-                    try:
-                        self.model.load_state_dict(torch.load(latest_file, map_location=device))
-                        print("Successfully loaded model from {}".format(latest_file))
-                    except RuntimeError as e:
-                        print("Warning: Could not load model (architecture mismatch)")
-                        print("This is expected if the model was trained with old architecture.")
-                        print("Starting with new randomly initialized model")
-                        self.latest_file_number = -1  # Start fresh
-            else:
-                savepath = os.path.join(cfg.SAVE_MODEL_PATH,cfg.BEST_MODEL.format(self.latest_file_number))
-                torch.save(self.model.state_dict(), savepath)
-                print("init.....Saving Model.....BL",savepath)
+        
+        # Always start fresh - save initial model
+        savepath = os.path.join(cfg.SAVE_MODEL_PATH,cfg.BEST_MODEL.format(self.latest_file_number))
+        torch.save(self.model.state_dict(), savepath)
+        print("Starting fresh. Initialized model saved to:", savepath)
             
-        self.train_data,self.eval_data = self.load_data()
+        self.train_data, self.eval_data = self.load_data()
         
         
 
@@ -63,6 +39,7 @@ class Trainer:
         all_data = TicTacToeDataset(ds.training_dataset)
         empty_eval = TicTacToeDataset([])
         return all_data, empty_eval
+
     def train(self):
         train_dataloader = DataLoader(self.train_data,\
                         batch_size=cfg.BATCH_SIZE,\
@@ -78,22 +55,24 @@ class Trainer:
         for epoch in range(cfg.EPOCHS):
             self.model.train()
             train_loss = 0
-            for i, (X,v,p) in enumerate(train_dataloader):
-                X = X.to(device)
-                v = v.to(device)
-                p = p.to(device)
+            for i, (X, v, p) in enumerate(train_dataloader): # iterate through the batch
+                X = X.to(device) # board state
+                v = v.to(device) # value target 
+                p = p.to(device) # policy target
 
-                yv,yp = self.model(X)
-                vloss = value_criterion(yv,v)
-                aloss = policy_criterion(yp,p)
+                # forward pass & loss calculation
+                yv, yp = self.model(X)
+                vloss = value_criterion(yv, v) # value loss
+                aloss = policy_criterion(yp, p) # policy loss
 
                 loss = vloss + aloss
-                train_loss+=loss.item()
+                train_loss += loss.item() # accumulate the loss
 
+                # backpropagation
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-            train_loss = train_loss/len(train_dataloader)
+            train_loss = train_loss / len(train_dataloader)
 
             # Save model based on training loss
             lr_scheduler.step(train_loss)
@@ -109,66 +88,9 @@ class Trainer:
         logpath = os.path.join(cfg.LOGDIR,"{}_history.csv".format(self.latest_file_number+1))
         history.to_csv(logpath,index=None)
         print(history)
-        game = TicTacToe()
-        model_path_old = os.path.join(cfg.SAVE_MODEL_PATH,cfg.BEST_MODEL.format(self.latest_file_number))
-        vpn_old = ValuePolicyNetwork(model_path_old)
-        policy_value_network_old = vpn_old.get_vp
-        mtcs_old = MonteCarloTreeSearch(game,policy_value_network_old)
-        
-        model_path = os.path.join(cfg.SAVE_MODEL_PATH,cfg.BEST_MODEL.format(self.latest_file_number+1))
-        vpn = ValuePolicyNetwork(model_path)
-        policy_value_network = vpn.get_vp
-        mtcs = MonteCarloTreeSearch(game,policy_value_network)
-        
-        root_node = mtcs.init_root_node()
-        num_games = cfg.EVAL_GAMES
-        results = []
-        for game_number in tqdm(range(num_games),total=num_games):
-            player=1
-            node = root_node
-            while game.win_or_draw(node.state)==None:
-                if player ==1:
-                    node = mtcs.run_simulation(root_node=node,num_simulations=1600,player=player)
-                    action,node,action_probs = mtcs.select_move(node=node,mode="exploit",temperature=1)
-                if player ==-1:
-                    node = mtcs_old.run_simulation(root_node=node,num_simulations=1600,player=player)
-                    action,node,action_probs = mtcs_old.select_move(node=node,mode="exploit",temperature=1)
-                player = -1*player
-            winner = game.get_reward_for_next_player(node.state,player)
-            if winner==1:
-                results.append([game_number,winner,"model"])
-            if winner==0:
-                results.append([game_number,winner,"draw"])
-            if winner==-1:
-                results.append([game_number,winner,"old_model"])
 
-        mtcs_old = MonteCarloTreeSearch(game,policy_value_network_old)
-        mtcs = MonteCarloTreeSearch(game,policy_value_network)
+        # evalutaion step
 
-        root_node = mtcs.init_root_node()
-
-        for game_number in tqdm(range(num_games),total=num_games):
-            player=1
-            node = root_node
-            while game.win_or_draw(node.state)==None:
-                if player ==1:
-                    node = mtcs_old.run_simulation(root_node=node,num_simulations=1600,player=player)
-                    action,node,action_probs = mtcs_old.select_move(node=node,mode="exploit",temperature=1)
-                if player ==-1:
-                    node = mtcs.run_simulation(root_node=node,num_simulations=1600,player=player)
-                    action,node,action_probs = mtcs.select_move(node=node,mode="exploit",temperature=1)
-                player = -1*player
-            winner = game.get_reward_for_next_player(node.state,player)
-            if winner==1:
-                results.append([game_number,winner,"old_model"])
-            if winner==0:
-                results.append([game_number,winner,"draw"])
-            if winner==-1:
-                results.append([game_number,winner,"model"])
-        dfresults = pd.DataFrame(results,columns=["game_number","winner","model"])
-        print(dfresults.groupby("model")["winner"].value_counts())
-        logpath = os.path.join(cfg.LOGDIR,"{}_result.csv".format(self.latest_file_number+1))
-        dfresults.to_csv(logpath,index=None)
 if __name__=="__main__":
     trainer = Trainer()
     trainer.train()

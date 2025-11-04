@@ -25,17 +25,17 @@ class ValuePolicyNetwork:
         Get value and policy predictions for a board state.
         
         Args:
-            state: Flat array of 9 values (from game.state)
+            state: Flat array of 16 values (from game.state)
             player: Current player (1 or -1) for canonical representation
         
         Returns:
             value: Position evaluation (float)
-            policy: Move probabilities (array of 9 values)
+            policy: Move probabilities (array of 16 values)
         """
         # Convert to canonical 3-plane representation
         canonical_state = board_to_canonical_3d(state, player)
         
-        # Convert to tensor and add batch dimension: (3, 3, 3) -> (1, 3, 3, 3)
+        # Convert to tensor and add batch dimension: (3, 4, 4) -> (1, 3, 4, 4)
         state_tensor = torch.from_numpy(canonical_state).unsqueeze(0).to(device)
         
         with torch.no_grad():
