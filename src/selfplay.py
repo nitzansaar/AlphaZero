@@ -14,23 +14,22 @@ save_path = os.path.join(cfg.SAVE_PICKLES, cfg.DATASET_PATH)
 game = TicTacToe()
 vpn = ValuePolicyNetwork()
 policy_value_network = vpn.get_vp
-mcts = MonteCarloTreeSearch(game,policy_value_network)
+mcts = MonteCarloTreeSearch(game, policy_value_network)
 root_node = mcts.init_root_node()
 num_games = cfg.SELFPLAY_GAMES
 
 
 training_dataset = TrainingDataset()
-for game_number in tqdm(range(num_games),total=num_games):
-    player = 1
-    node = root_node
+for game_number in tqdm(range(num_games),total=num_games): # play 2500 games
+    node = root_node # start with an empty board
     dataset = []
     while game.win_or_draw(node.state) == None: # while the game is not over
         parent_state = copy(node.state)
-        node = mcts.run_simulation(root_node=node,num_simulations=1600,player=player)
+        node = mcts.run_simulation(root_node=node, num_simulations=1600, player=player) # run mcts to find the best action
         action, node, action_probs = mcts.select_move(node=node, mode="explore", temperature=1) # select the action with the probability of the visits
         dataset.append([parent_state, action_probs, player])
-        player = -1 * player
-    winner = game.get_reward_for_next_player(node.state,player)
+        player = -1 * player # switch player
+    winner = game.get_reward_for_next_player(node.state,player) # assign value based on the winner
     training_dataset.add_game_to_training_dataset(dataset,winner)
     if game_number % 500 == 0: # save the training dataset every 500 games
         training_dataset.save(save_path) 

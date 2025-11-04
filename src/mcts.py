@@ -17,51 +17,18 @@ class Node:
             state = copy(parent.state) * -1
             state[action_index] = -1
             self.state = copy(state)
-    def get_level(self):
-        level = 0
-        p = self.parent
-        while p:
-            level += 1
-            p = p.parent
-        return level
-    def print_tree(self):
-        spaces = ' ' * self.get_level() * 3
-        prefix = spaces + "|__" if self.parent else ""
-        print(prefix + str(self.state)+",value:"+str(self.total_action_value_of_next_state_W)+",player:"+str(self.player)\
-             +",N:"+str(self.total_visits_N)+",Q:"+str(self.mean_action_value_of_next_state_Q))
-        if self.is_leaf_node()==False:
-            for _,child in self.children.items():
-#                 if child.is_leaf_node()==False:
-                    child.print_tree()
-    def get_tree_dict(self):
-        dict_ = [{"state":self.state}]
-        if self.is_leaf_node()==False:
-            for _,child in self.children.items():
-                if child.is_leaf_node()==False:
-                    dict_.append(child.get_tree_dict())
-        return dict_
-    def build_tree(self,node):
-        tree = {}
-        if type(node.state) ==np.ndarray:
-            tree["name"]= str(list([int(t) for t in node.state]))
-            tree["attributes"]={}
-            tree["attributes"]["nodeBoardState"] = list([int(t) for t in node.state])
-        tree["attributes"]["pl"]= int(node.player)
-        tree["attributes"]["visits"]= int(node.total_visits_N)
-        tree["children"]=[]
-        for k,v in node.children.items():
-            if type(v.state) ==np.ndarray:
-                tree["children"].append(self.build_tree(v))
 
-        return tree
     def set_state(self,state):
         self.state = state
+
     def expand(self,action_probs,player,parent):
         for i,action_prob in enumerate(action_probs):
             if action_prob != 0:
                 self.children[i] = Node(action_prob, player, parent, i) # create a new node for the action
+
     def is_leaf_node(self):
         return len(self.children)==0
+
     def select_best_child(self):
         best_uscore = float('-inf')
         for i, child in self.children.items():
@@ -75,8 +42,6 @@ class Node:
                 best_uscore = Uscore
                 best_child_index = i
         return best_child_index,self.children[best_child_index]  
-    def return_node_in_human_eval(self,action_index):
-        return self.children[action_index]
 class MonteCarloTreeSearch:
     def __init__(self,game,policy_value_network):
         self.game = game
@@ -95,7 +60,7 @@ class MonteCarloTreeSearch:
             elif winner ==0:
                 value = 0
             else:
-                value = -1 if winner==node.player else 1
+                value = -1 if winner == node.player else 1
             node.total_action_value_of_next_state_W = node.total_action_value_of_next_state_W + value
             node.mean_action_value_of_next_state_Q = node.total_action_value_of_next_state_W/node.total_visits_N
 
@@ -151,7 +116,5 @@ class MonteCarloTreeSearch:
             action_probs[k] = v.total_visits_N
         action_probs = [action_prob/sum(action_probs) for action_prob in action_probs]
         return action, subtree, action_probs
-    def select_subtree_for_manual_action(self,node,action_index):
-        return node.children[action_index]
         
             
