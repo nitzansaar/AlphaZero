@@ -28,35 +28,36 @@ class TicTacToeDataset:
 
 class TrainingDataset:
     def __init__(self):
-        self.training_dataset = [] # list of tuples (state,value,policy)
+        self.training_dataset = [] # list of tuples (state, value, policy)
     
-    def calculate_values(self,dataset,winner): # assign value to each position in the dataset based on the winner
-        for ind,step in enumerate(dataset):
+    def calculate_values(self, dataset, winner): # assign value to each position in the dataset based on the winner
+        for ind, step in enumerate(dataset):
             step_ = copy(step)
             step_player = step_[2]
             if winner == 0: # draw
                 value = 0
             else:
-                if winner==step_player:
+                if winner == step_player: # if the winner is the same as the player, return 1
                     value = 1
                 else:
-                    value =-1
+                    value = -1
             step_.append(value)
             dataset[ind] = step_
         return dataset
+
     def add_game_to_training_dataset(self,dataset,winner): # add the completed game data to the training dataset
-        data = self.calculate_values(dataset,winner)
+        data = self.calculate_values(dataset, winner)
         self.training_dataset.extend(data)
-        self.training_dataset = self.training_dataset[-1*cfg.DATASET_QUEUE_SIZE:]    
+        self.training_dataset = self.training_dataset[-1 * cfg.DATASET_QUEUE_SIZE:] # keep the last 500000 games in the training dataset
     
     def save(self,path): # save the training dataset to a pickle file
-#         pickle.dump(self.training_dataset,path)
         with open(path, 'wb') as handle:
             pickle.dump(self.training_dataset,handle)
+
     def load(self,path): # load the training dataset from a pickle file
-#         self.training_dataset = pickle.load(path)
         with open(path, 'rb') as handle:
             self.training_dataset = pickle.load(handle)
+
     def retreive_test_train_data(self): 
         data = self.training_dataset
         num_samples = len(data)

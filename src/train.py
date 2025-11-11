@@ -5,25 +5,21 @@ from torch.utils.data import DataLoader
 from model import NeuralNetwork
 from dataset import TrainingDataset, TicTacToeDataset
 from config import Config as cfg
-from game import TicTacToe
 from glob import glob
 import pandas as pd
-from value_policy_function import ValuePolicyNetwork
-from mcts import MonteCarloTreeSearch
-from tqdm import tqdm
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using {device} device")
 
 class Trainer:
-    def __init__(self,modelpath=None):
-        os.makedirs(cfg.SAVE_MODEL_PATH,exist_ok=True)
-        os.makedirs(cfg.LOGDIR,exist_ok=True)
+    def __init__(self, modelpath=None):
+        os.makedirs(cfg.SAVE_MODEL_PATH, exist_ok = True)
+        os.makedirs(cfg.LOGDIR,exist_ok = True)
         self.model = NeuralNetwork().to(device)
         self.modelpath = modelpath
         self.latest_file_number = -1
         if modelpath:
             try:
-                self.model.load_state_dict(torch.load(modelpath, map_location=device))
+                self.model.load_state_dict(torch.load(modelpath, map_location=device)) # load the model from the modelpath
                 print(f"Loaded model from {modelpath}")
             except RuntimeError as e:
                 print(f"Warning: Could not load model from {modelpath}")
@@ -31,10 +27,10 @@ class Trainer:
                 print("Starting with new randomly initialized model")
         else:
             all_models = glob(cfg.SAVE_MODEL_PATH + "/*.pt")
-            if len(all_models)>0:
+            if len(all_models) > 0: # if there are any models in the save model path
                 files = [int(os.path.basename(f).split("_")[0]) for f in all_models if os.path.basename(f).split("_")[0].isdigit()]
                 if files:
-                    self.latest_file_number = max(files)
+                    self.latest_file_number = max(files) # get the latest file number
                     latest_file = os.path.join(cfg.SAVE_MODEL_PATH,cfg.BEST_MODEL.format(self.latest_file_number))
                     print("Attempting to load latest model: {}".format(latest_file))
                     try:
@@ -55,15 +51,15 @@ class Trainer:
         
     def load_data(self):
         ds = TrainingDataset()
-        save_path = os.path.join(cfg.SAVE_PICKLES,cfg.DATASET_PATH)
+        save_path = os.path.join(cfg.SAVE_PICKLES, cfg.DATASET_PATH)
         ds.load(save_path)
-        # Return all data as training data, empty eval dataset
+        # return all data as training data
         all_data = TicTacToeDataset(ds.training_dataset)
-        empty_eval = TicTacToeDataset([])
-        return all_data, empty_eval
+        # empty_eval = TicTacToeDataset([])
+        return all_data
 
     def train(self):
-        self.train_data, self.eval_data = self.load_data()
+        self.train_data = self.load_data()
         train_dataloader = DataLoader(self.train_data,\
                         batch_size=cfg.BATCH_SIZE,\
                         shuffle=True)
@@ -99,17 +95,18 @@ class Trainer:
 
             # Save model based on training loss
             lr_scheduler.step(train_loss)
+            # save the model based on the training loss
             if train_loss < best_loss:
                 best_loss = train_loss
-                savepath = os.path.join(cfg.SAVE_MODEL_PATH,cfg.BEST_MODEL.format(self.latest_file_number+1))
+                savepath = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(self.latest_file_number + 1))
                 torch.save(self.model.state_dict(), savepath)
-                print("Saving Model.....BL",savepath)
+                print("Saving Model.....BL", savepath)
             print(f"Epoch {epoch}:: Train Loss: {train_loss};")
-            history.append([epoch,train_loss])
+            history.append([epoch, train_loss])
         
         history = pd.DataFrame(history,columns=["Epoch","Tr_Loss"])
-        logpath = os.path.join(cfg.LOGDIR,"{}_history.csv".format(self.latest_file_number+1))
-        history.to_csv(logpath,index=None)
+        logpath = os.path.join(cfg.LOGDIR, "{}_history.csv".format(self.latest_file_number + 1))
+        history.to_csv(logpath, index=None)
         print(history)
 
         # evalutaion step

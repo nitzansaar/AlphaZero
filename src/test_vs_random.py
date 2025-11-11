@@ -49,40 +49,40 @@ def format_board_as_string(board_state):
             lines.append("  " + "-" * 13)  # Separator between rows
     return "\n".join(lines)
 
-def format_policy_probs(policy_probs, action_index=None):
+def format_visit_counts(visit_counts, action_index=None):
     """
-    Format policy probabilities as a 4x4 grid string.
+    Format visit counts as a 4x4 grid string.
     Args:
-        policy_probs: List of 16 probabilities
+        visit_counts: List of 16 visit counts
         action_index: Optional action index to highlight
     Returns:
-        Multi-line string showing the policy probabilities
+        Multi-line string showing the visit counts
     """
     # Reshape to 4x4
-    policy_grid = np.array(policy_probs).reshape(4, 4)
+    visit_grid = np.array(visit_counts).reshape(4, 4)
     lines = []
     for i in range(4):
         row_strs = []
         for j in range(4):
             idx = i * 4 + j
-            prob = policy_grid[i, j]
+            count = visit_grid[i, j]
             if action_index is not None and idx == action_index:
-                row_strs.append(f"{prob:.3f}*")  # Mark selected move
+                row_strs.append(f"{int(count):4d}*")  # Mark selected move
             else:
-                row_strs.append(f"{prob:.3f}")
+                row_strs.append(f"{int(count):4d}")
         lines.append("  " + " | ".join(row_strs))
         if i < 3:
-            lines.append("  " + "-" * 35)  # Separator between rows
+            lines.append("  " + "-" * 41)  # Separator between rows
     return "\n".join(lines)
 
-def get_top_moves(policy_probs, top_k=5):
+def get_top_moves(visit_counts, top_k=5):
     """
-    Get top k moves with their probabilities and coordinates.
-    Returns list of tuples: (action_index, prob, coords)
+    Get top k moves with their visit counts and coordinates.
+    Returns list of tuples: (action_index, visit_count, coords)
     """
-    indices = np.argsort(policy_probs)[::-1][:top_k]
-    return [(int(idx), float(policy_probs[idx]), action_index_to_coords(idx)) 
-            for idx in indices if policy_probs[idx] > 0]
+    indices = np.argsort(visit_counts)[::-1][:top_k]
+    return [(int(idx), int(visit_counts[idx]), action_index_to_coords(idx)) 
+            for idx in indices if visit_counts[idx] > 0]
 
 def action_index_to_coords(action_index):
     """Convert action index to row, col coordinates"""
@@ -154,17 +154,21 @@ def play_game_bot_first(game, mcts, random_player, num_simulations=1600):
             # Create fresh node for bot
             node = Node(prior_prob=0, player=player, action_index=None)
             node.set_state(state.copy())
-            node = mcts.run_simulation(root_node=node, num_simulations=num_simulations, player=player)
-            action, node, action_probs = mcts.select_move(node=node, mode="exploit", temperature=1)
+            root_node = mcts.run_simulation(root_node=node, num_simulations=num_simulations, player=player)
+            
+            # Extract visit counts directly from root node children BEFORE select_move
+            visit_counts = np.zeros(cfg.ACTION_SIZE)
+            for k, v in root_node.children.items():
+                visit_counts[k] = v.total_visits_N
+            visit_counts_list = [int(v) for v in visit_counts]
+            top_moves = get_top_moves(visit_counts_list, top_k=5)
+            
+            action, node, action_probs = mcts.select_move(node=root_node, mode="exploit", temperature=1)
             action_index = np.argmax(action)
             # Update canonicalized state
             state = node.state.copy()
             # Update absolute state (player 1 plays)
             absolute_state[action_index] = 1
-            
-            # Convert action_probs to list and get top moves
-            policy_probs_list = [float(p) for p in action_probs]
-            top_moves = get_top_moves(policy_probs_list, top_k=5)
             
             # Record bot move
             board_state_formatted = format_board_state(absolute_state.copy())
@@ -177,8 +181,8 @@ def play_game_bot_first(game, mcts, random_player, num_simulations=1600):
                 'board_state': board_state_formatted,
                 'board_state_formatted': format_board_as_string(board_state_formatted),
                 'board_state_flat': [float(x) for x in absolute_state.copy().tolist()],
-                'policy_probs': policy_probs_list,
-                'policy_probs_formatted': format_policy_probs(policy_probs_list, action_index),
+                'visit_counts': visit_counts_list,
+                'visit_counts_formatted': format_visit_counts(visit_counts_list, action_index),
                 'top_moves': top_moves
             })
         else:  # Random player's turn
@@ -248,17 +252,21 @@ def play_game_random_first(game, mcts, random_player, num_simulations=1600):
             # Create fresh node for bot
             node = Node(prior_prob=0, player=player, action_index=None)
             node.set_state(state.copy())
-            node = mcts.run_simulation(root_node=node, num_simulations=num_simulations, player=player)
-            action, node, action_probs = mcts.select_move(node=node, mode="exploit", temperature=1)
+            root_node = mcts.run_simulation(root_node=node, num_simulations=num_simulations, player=player)
+            
+            # Extract visit counts directly from root node children BEFORE select_move
+            visit_counts = np.zeros(cfg.ACTION_SIZE)
+            for k, v in root_node.children.items():
+                visit_counts[k] = v.total_visits_N
+            visit_counts_list = [int(v) for v in visit_counts]
+            top_moves = get_top_moves(visit_counts_list, top_k=5)
+            
+            action, node, action_probs = mcts.select_move(node=root_node, mode="exploit", temperature=1)
             action_index = np.argmax(action)
             # Update canonicalized state
             state = node.state.copy()
             # Update absolute state (player -1 plays)
             absolute_state[action_index] = -1
-            
-            # Convert action_probs to list and get top moves
-            policy_probs_list = [float(p) for p in action_probs]
-            top_moves = get_top_moves(policy_probs_list, top_k=5)
             
             # Record bot move
             board_state_formatted = format_board_state(absolute_state.copy())
@@ -271,8 +279,8 @@ def play_game_random_first(game, mcts, random_player, num_simulations=1600):
                 'board_state': board_state_formatted,
                 'board_state_formatted': format_board_as_string(board_state_formatted),
                 'board_state_flat': [float(x) for x in absolute_state.copy().tolist()],
-                'policy_probs': policy_probs_list,
-                'policy_probs_formatted': format_policy_probs(policy_probs_list, action_index),
+                'visit_counts': visit_counts_list,
+                'visit_counts_formatted': format_visit_counts(visit_counts_list, action_index),
                 'top_moves': top_moves
             })
         else:  # Random player's turn
@@ -549,16 +557,16 @@ def main():
                 for row in board_state:
                     f.write("  " + " ".join(row) + "\n")
                 
-                # Print policy probabilities for bot moves
-                if player == 'bot' and 'policy_probs_formatted' in move_data:
-                    f.write(f"\nBot's Policy Probabilities (MCTS visit-based):\n")
-                    f.write(move_data['policy_probs_formatted'])
+                # Print visit counts for bot moves
+                if player == 'bot' and 'visit_counts_formatted' in move_data:
+                    f.write(f"\nBot's MCTS Visit Counts:\n")
+                    f.write(move_data['visit_counts_formatted'])
                     f.write("\n")
                     if 'top_moves' in move_data and move_data['top_moves']:
                         f.write("Top 5 moves considered:\n")
-                        for idx, (action_idx, prob, (r, c)) in enumerate(move_data['top_moves'], 1):
+                        for idx, (action_idx, visit_count, (r, c)) in enumerate(move_data['top_moves'], 1):
                             marker = " <- SELECTED" if action_idx == move_data['action_index'] else ""
-                            f.write(f"  {idx}. Position ({r}, {c}): {prob:.3f}{marker}\n")
+                            f.write(f"  {idx}. Position ({r}, {c}): {visit_count} visits{marker}\n")
                     f.write("\n")
                 
             f.write("\n")
@@ -571,8 +579,8 @@ def main():
                     break
                 if row.count('O') == 4:
                     winner = 'O (Player -1)'
-                    break
-            
+                    break            
+
             if winner:
                 f.write(f"Winner: {winner}\n")
             elif all('.' not in row for row in final_state):
