@@ -30,11 +30,11 @@ for game_number in tqdm(range(num_games),total=num_games): # play 2500 games
         action, node, action_probs = mcts.select_move(node=node, mode="explore", temperature=1) # select the action with the probability of the visits
         dataset.append([parent_state, action_probs, player]) # board state, action probabilities, player
         player = -1 * player # switch player
-    winner = game.get_reward_for_next_player(node.state,player) # assign value based on the winner
-    training_dataset.add_game_to_training_dataset(dataset,winner)
+    winner = game.get_reward_for_next_player(node.state, player) # assign value based on the winner
+    training_dataset.add_game_to_training_dataset(dataset, winner)
     if game_number % 500 == 0: # save the training dataset every 500 games
         training_dataset.save(save_path) 
-        print("saving....",game_number)
+        print("saving....", game_number)
 
     
 training_dataset.save(save_path)

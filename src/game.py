@@ -51,7 +51,7 @@ class TicTacToe:
         next_state[np.argmax(action)]=1
         return next_state *-1
     def win_or_draw(self,state):
-        state = state.reshape(4,4)
+        state = state.reshape(4, 4)
         
         # Check rows for 4 in a row
         for i in range(4):
@@ -91,11 +91,9 @@ class TicTacToe:
         winner = self.win_or_draw(state)
         if winner:
             if winner in [-1,1]:
-#                 print(f"player {-1*player} won")
-                return -1*player
-            # print("Draw")
+                return -1 * player # return the reward for the next player
             return 0
         return winner
     def play(self,board_state,player,action_index):
         board_state[action_index] = player
-        return board_state,self.win_or_draw(board_state),-1*player
+        return board_state,self.win_or_draw(board_state),-1 * player
