@@ -2,14 +2,14 @@
 
 A general N×N K-in-a-row game agent that learns to play optimally via self-play, guided by a policy/value neural network and Monte Carlo Tree Search (MCTS).
 
-Currently only support 4 by 4 tictactoe
+Currently support 5 by 5, 4 in a row tictactoe 
 
 Never loses to random play
 
 ## Project Overview
 
 This project implements a complete AlphaZero-inspired reinforcement learning system that:
-- Plays generalized tic-tac-toe on any N×N board (4 by 4 for now)
+- Plays generalized tic-tac-toe on any N×N board
 - Learns optimal strategies through MCTS-guided self-play
 - Uses dual-head neural network (policy + value)
 
