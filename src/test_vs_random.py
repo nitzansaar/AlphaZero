@@ -17,9 +17,9 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 def format_board_state(state):
     """
     Convert board state to a readable 2D representation.
-    Returns a 4x4 grid with 'X' for player 1, 'O' for player -1, '.' for empty
+    Returns a 5x5 grid with 'X' for player 1, 'O' for player -1, '.' for empty
     """
-    board_2d = state.reshape(4, 4)
+    board_2d = state.reshape(5, 5)
     formatted = []
     for row in board_2d:
         formatted_row = []
@@ -35,7 +35,7 @@ def format_board_state(state):
 
 def format_board_as_string(board_state):
     """
-    Format the board state as a readable 4x4 grid string.
+    Format the board state as a readable 5x5 grid string.
     Args:
         board_state: List of lists representing the board (from format_board_state)
     Returns:
@@ -46,33 +46,33 @@ def format_board_as_string(board_state):
         row_str = " | ".join(row)
         lines.append(f"  {row_str}")
         if i < len(board_state) - 1:
-            lines.append("  " + "-" * 13)  # Separator between rows
+            lines.append("  " + "-" * 17)  # Separator between rows (5 cells * 3 chars + 2 separators)
     return "\n".join(lines)
 
 def format_visit_counts(visit_counts, action_index=None):
     """
-    Format visit counts as a 4x4 grid string.
+    Format visit counts as a 5x5 grid string.
     Args:
-        visit_counts: List of 16 visit counts
+        visit_counts: List of 25 visit counts
         action_index: Optional action index to highlight
     Returns:
         Multi-line string showing the visit counts
     """
-    # Reshape to 4x4
-    visit_grid = np.array(visit_counts).reshape(4, 4)
+    # Reshape to 5x5
+    visit_grid = np.array(visit_counts).reshape(5, 5)
     lines = []
-    for i in range(4):
+    for i in range(5):
         row_strs = []
-        for j in range(4):
-            idx = i * 4 + j
+        for j in range(5):
+            idx = i * 5 + j
             count = visit_grid[i, j]
             if action_index is not None and idx == action_index:
                 row_strs.append(f"{int(count):4d}*")  # Mark selected move
             else:
                 row_strs.append(f"{int(count):4d}")
         lines.append("  " + " | ".join(row_strs))
-        if i < 3:
-            lines.append("  " + "-" * 41)  # Separator between rows
+        if i < 4:
+            lines.append("  " + "-" * 51)  # Separator between rows
     return "\n".join(lines)
 
 def get_top_moves(visit_counts, top_k=5):
@@ -86,8 +86,8 @@ def get_top_moves(visit_counts, top_k=5):
 
 def action_index_to_coords(action_index):
     """Convert action index to row, col coordinates"""
-    row = action_index // 4
-    col = action_index % 4
+    row = action_index // 5
+    col = action_index % 5
     return (row, col)
 
 def convert_numpy_types(obj):
@@ -410,48 +410,36 @@ def main():
     
     results = []
     all_games_history = []
-    
-    # Play half the games with bot going first
-    print("\n[1/2] Bot playing as Player 1 (X - goes first):")
-    for game_num in tqdm(range(num_games // 2), total=num_games // 2):
-        result, game_history = play_game_bot_first(game, mcts, random_player, num_simulations)
+
+    # Play games with bot alternating going first and second
+    print("\nPlaying bot vs random games (alternating first/second):")
+    for game_num in tqdm(range(num_games), total=num_games):
+        # Alternate who goes first
+        if game_num % 2 == 0:
+            # Bot goes first
+            result, game_history = play_game_bot_first(game, mcts, random_player, num_simulations)
+            bot_position = 'first'
+            bot_player = 1
+        else:
+            # Random goes first
+            result, game_history = play_game_random_first(game, mcts, random_player, num_simulations)
+            bot_position = 'second'
+            bot_player = -1
+
         outcome = 'bot_win' if result == 1 else ('draw' if result == 0 else 'random_win')
-        
+
         results.append({
             'game_number': game_num,
-            'bot_position': 'first',
-            'bot_player': 1,
+            'bot_position': bot_position,
+            'bot_player': bot_player,
             'result': result,
             'outcome': outcome
         })
-        
+
         all_games_history.append({
             'game_number': game_num,
-            'bot_position': 'first',
-            'bot_player': 1,
-            'result': result,
-            'outcome': outcome,
-            'moves': game_history
-        })
-    
-    # Play half the games with random going first
-    print("\n[2/2] Bot playing as Player -1 (O - goes second):")
-    for game_num in tqdm(range(num_games // 2, num_games), total=num_games // 2):
-        result, game_history = play_game_random_first(game, mcts, random_player, num_simulations)
-        outcome = 'bot_win' if result == 1 else ('draw' if result == 0 else 'random_win')
-        
-        results.append({
-            'game_number': game_num,
-            'bot_position': 'second',
-            'bot_player': -1,
-            'result': result,
-            'outcome': outcome
-        })
-        
-        all_games_history.append({
-            'game_number': game_num,
-            'bot_position': 'second',
-            'bot_player': -1,
+            'bot_position': bot_position,
+            'bot_player': bot_player,
             'result': result,
             'outcome': outcome,
             'moves': game_history
@@ -573,12 +561,16 @@ def main():
             # Determine final winner
             final_state = game_data['moves'][-1]['board_state']
             winner = None
+            # Check rows
             for row in final_state:
-                if row.count('X') == 4:
-                    winner = 'X (Player 1)'
-                    break
-                if row.count('O') == 4:
-                    winner = 'O (Player -1)'
+                for j in range(2):
+                    if row[j:j+4].count('X') == 4:
+                        winner = 'X (Player 1)'
+                        break
+                    if row[j:j+4].count('O') == 4:
+                        winner = 'O (Player -1)'
+                        break
+                if winner:
                     break            
 
             if winner:
@@ -591,36 +583,39 @@ def main():
 
     # Create visualizations
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-    
+
     # Overall results distribution
     outcome_counts = df_results['outcome'].value_counts()
     colors = {'bot_win': 'green', 'draw': 'gray', 'random_win': 'red'}
-    outcome_colors = [colors.get(outcome, 'blue') for outcome in outcome_counts.index]
-    
+    outcome_colors = [colors.get(outcome, 'green') for outcome in outcome_counts.index]
+
     ax1.bar(outcome_counts.index, outcome_counts.values, color=outcome_colors)
     ax1.set_xlabel('Outcome')
     ax1.set_ylabel('Number of Games')
     ax1.set_title('Overall Results Distribution')
-    ax1.set_xticklabels(['Bot Win', 'Draw', 'Random Win'])
-    
+
+    # Set x-tick labels based on what outcomes actually exist
+    label_map = {'bot_win': 'Bot Win', 'draw': 'Draw', 'random_win': 'Random Win'}
+    ax1.set_xticklabels([label_map.get(outcome, outcome) for outcome in outcome_counts.index])
+
     # Add percentage labels on bars
     for i, (outcome, count) in enumerate(outcome_counts.items()):
         percentage = count / total_games * 100
         ax1.text(i, count, f'{count}\n({percentage:.1f}%)', ha='center', va='bottom')
-    
+
     # Results by bot position (grouped bar chart)
     positions = ['first', 'second']
     outcomes = ['bot_win', 'draw', 'random_win']
     x = np.arange(len(positions))
     width = 0.25
-    
+
     for i, outcome in enumerate(outcomes):
-        counts = [len(df_results[(df_results['bot_position'] == pos) & (df_results['outcome'] == outcome)]) 
+        counts = [len(df_results[(df_results['bot_position'] == pos) & (df_results['outcome'] == outcome)])
                   for pos in positions]
         offset = (i - 1) * width
-        ax2.bar(x + offset, counts, width, label=outcome.replace('_', ' ').title(), 
-                color=colors.get(outcome, 'blue'))
-    
+        ax2.bar(x + offset, counts, width, label=outcome.replace('_', ' ').title(),
+                color=colors.get(outcome, 'green'))
+
     ax2.set_xlabel('Bot Position')
     ax2.set_ylabel('Number of Games')
     ax2.set_title('Results by Bot Position')
@@ -628,7 +623,7 @@ def main():
     ax2.set_xticklabels(['Bot First (X)', 'Bot Second (O)'])
     ax2.legend()
     ax2.grid(axis='y', alpha=0.3)
-    
+
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "bot_vs_random_results.png"), dpi=150)
     plt.close()
