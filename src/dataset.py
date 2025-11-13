@@ -13,7 +13,7 @@ class TicTacToeDataset:
     
     def __getitem__(self,index):
         datapoint = self.data[index]
-        state_flat = datapoint[0]  # Flat array of 16 values
+        state_flat = datapoint[0]  # Flat array of 81 values
         player = datapoint[2]      # Player (1 or -1)
         v = datapoint[3]           # Value target
         p = datapoint[1]           # Policy target

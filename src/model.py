@@ -13,8 +13,8 @@ class NeuralNetwork(nn.Module):
         self.conv2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
         
         # Shared fully connected layer
-        # Input size: 128 channels * 5 * 5 = 3200
-        self.fc_shared = nn.Linear(128 * 5 * 5, 256)
+        # Input size: 128 channels * 9 * 9 = 10368
+        self.fc_shared = nn.Linear(128 * 9 * 9, 256)
         
         # Value head
         self.fc_value1 = nn.Linear(256, 64)
@@ -27,13 +27,13 @@ class NeuralNetwork(nn.Module):
         self.dropout = nn.Dropout(0.2)
 
     def forward(self, x):
-        # x shape: (batch, 3, 5, 5) - 3 planes: current player, opponent, empty
+        # x shape: (batch, 3, 9, 9) - 3 planes: current player, opponent, empty
         # Conv layers
-        x = self.relu(self.conv1(x))  # (batch, 64, 5, 5)
-        x = self.relu(self.conv2(x))  # (batch, 128, 5, 5)
+        x = self.relu(self.conv1(x))  # (batch, 64, 9, 9)
+        x = self.relu(self.conv2(x))  # (batch, 128, 9, 9)
 
         # Flatten for fully connected
-        x = x.view(-1, 128 * 5 * 5)  # (batch, 3200)
+        x = x.view(-1, 128 * 9 * 9)  # (batch, 10368)
         x = self.dropout(self.relu(self.fc_shared(x)))  # (batch, 256)
 
         # Value head
@@ -41,6 +41,6 @@ class NeuralNetwork(nn.Module):
         value = torch.tanh(self.fc_value2(value))  # (batch, 1) in [-1, 1]
 
         # Policy head
-        policy = self.fc_policy(x)  # (batch, 25)
+        policy = self.fc_policy(x)  # (batch, 81)
 
         return value, policy
