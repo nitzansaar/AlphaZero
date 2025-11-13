@@ -2,9 +2,10 @@
 
 A general N×N K-in-a-row game agent that learns to play optimally via self-play, guided by a policy/value neural network and Monte Carlo Tree Search (MCTS).
 
-Currently support 5 by 5, 4 in a row tictactoe 
+Currently support 9 by 9, 5 in a row tictactoe 
 
 Never loses to random play
+
 
 ## Project Overview
 
@@ -20,5 +21,8 @@ This project implements a complete AlphaZero-inspired reinforcement learning sys
 
 ## Simulate play versus random player
 - python3 test_vs_random.py
+
+## Simulate play vs bot
+- python3 test_bot_vs_bot.py
 
 
