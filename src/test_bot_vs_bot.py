@@ -17,9 +17,9 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 def format_board_state(state):
     """
     Convert board state to a readable 2D representation.
-    Returns a 5x5 grid with 'X' for player 1, 'O' for player -1, '.' for empty
+    Returns a 9x9 grid with 'X' for player 1, 'O' for player -1, '.' for empty
     """
-    board_2d = state.reshape(5, 5)
+    board_2d = state.reshape(9, 9)
     formatted = []
     for row in board_2d:
         formatted_row = []
@@ -35,7 +35,7 @@ def format_board_state(state):
 
 def format_board_as_string(board_state):
     """
-    Format the board state as a readable 5x5 grid string.
+    Format the board state as a readable 9x9 grid string.
     Args:
         board_state: List of lists representing the board (from format_board_state)
     Returns:
@@ -46,33 +46,33 @@ def format_board_as_string(board_state):
         row_str = " | ".join(row)
         lines.append(f"  {row_str}")
         if i < len(board_state) - 1:
-            lines.append("  " + "-" * 17)  # Separator between rows (5 cells * 3 chars + 2 separators)
+            lines.append("  " + "-" * 33)  # Separator between rows (9 cells * 3 chars + 8 separators)
     return "\n".join(lines)
 
 def format_visit_counts(visit_counts, action_index=None):
     """
-    Format visit counts as a 5x5 grid string.
+    Format visit counts as a 9x9 grid string.
     Args:
-        visit_counts: List of 25 visit counts
+        visit_counts: List of 81 visit counts
         action_index: Optional action index to highlight
     Returns:
         Multi-line string showing the visit counts
     """
-    # Reshape to 5x5
-    visit_grid = np.array(visit_counts).reshape(5, 5)
+    # Reshape to 9x9
+    visit_grid = np.array(visit_counts).reshape(9, 9)
     lines = []
-    for i in range(5):
+    for i in range(9):
         row_strs = []
-        for j in range(5):
-            idx = i * 5 + j
+        for j in range(9):
+            idx = i * 9 + j
             count = visit_grid[i, j]
             if action_index is not None and idx == action_index:
                 row_strs.append(f"{int(count):4d}*")  # Mark selected move
             else:
                 row_strs.append(f"{int(count):4d}")
         lines.append("  " + " | ".join(row_strs))
-        if i < 4:
-            lines.append("  " + "-" * 51)  # Separator between rows
+        if i < 8:
+            lines.append("  " + "-" * 60)  # Separator between rows (9 cells * 4 chars + 8 separators * 3 chars)
     return "\n".join(lines)
 
 def get_top_moves(visit_counts, top_k=5):
@@ -86,8 +86,8 @@ def get_top_moves(visit_counts, top_k=5):
 
 def action_index_to_coords(action_index):
     """Convert action index to row, col coordinates"""
-    row = action_index // 5
-    col = action_index % 5
+    row = action_index // 9
+    col = action_index % 9
     return (row, col)
 
 def convert_numpy_types(obj):

@@ -7,8 +7,14 @@ from game import board_to_canonical_3d
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+# RTX 5090 Optimizations for inference
+if device == "cuda":
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    torch.backends.cudnn.benchmark = True
+
 class ValuePolicyNetwork:
-    def __init__(self,path=None):
+    def __init__(self, path=None, use_compile=True):
         self.model = NeuralNetwork().to(device)
         if path:
             try:
@@ -17,25 +23,31 @@ class ValuePolicyNetwork:
             except RuntimeError as e:
                 print(f"Warning: Could not load model from {path} (architecture mismatch)")
                 print("Using randomly initialized model instead")
-         
+
         self.model.eval()
+
+        # Compile model for faster inference on RTX 5090
+        if use_compile and device == "cuda" and hasattr(torch, 'compile'):
+            print("Compiling inference model with torch.compile...")
+            self.model = torch.compile(self.model, mode="reduce-overhead")
+            print("Inference model compilation complete!")
     
     def get_vp(self, state, player=1):
         """
         Get value and policy predictions for a board state.
-        
+
         Args:
-            state: Flat array of 16 values (from game.state)
+            state: Flat array of 81 values (from game.state)
             player: Current player (1 or -1) for canonical representation
-        
+
         Returns:
             value: Position evaluation (float)
-            policy: Move probabilities (array of 16 values)
+            policy: Move probabilities (array of 81 values)
         """
         # Convert to canonical 3-plane representation
         canonical_state = board_to_canonical_3d(state, player)
-        
-        # Convert to tensor and add batch dimension: (3, 4, 4) -> (1, 3, 4, 4)
+
+        # Convert to tensor and add batch dimension: (3, 9, 9) -> (1, 3, 9, 9)
         state_tensor = torch.from_numpy(canonical_state).unsqueeze(0).to(device)
         
         with torch.no_grad():
