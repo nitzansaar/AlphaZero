@@ -19,10 +19,16 @@ This project implements a complete AlphaZero-inspired reinforcement learning sys
 - chmod +x ./train.sh
 - ./train.sh
 
+## Play against the bot (Human vs Bot)
+- cd src
+- python3 play_human_vs_bot.py
+
 ## Simulate play versus random player
+- cd src
 - python3 test_vs_random.py
 
 ## Simulate play vs bot
+- cd src
 - python3 test_bot_vs_bot.py
 
 
