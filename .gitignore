@@ -46,7 +46,6 @@ data/self_play/
 *.h5
 
 # Logs
-logs/
 *.log
 runs/
 tensorboard_logs/
