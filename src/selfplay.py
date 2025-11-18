@@ -6,13 +6,30 @@ from dataset import TrainingDataset
 from tqdm import tqdm
 from value_policy_function import ValuePolicyNetwork
 from copy import copy
+from glob import glob
 
 os.makedirs(cfg.SAVE_PICKLES, exist_ok=True) # create the save path if it doesn't exist
 save_path = os.path.join(cfg.SAVE_PICKLES, cfg.DATASET_PATH)
 
 
 game = TicTacToe()
-vpn = ValuePolicyNetwork()
+
+# Load the latest trained model if available
+all_models = glob(os.path.join(cfg.SAVE_MODEL_PATH, "*.pt"))
+if all_models:
+    files = [int(os.path.basename(f).split("_")[0]) for f in all_models if os.path.basename(f).split("_")[0].isdigit()]
+    if files:
+        latest_num = max(files)
+        model_path = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(latest_num))
+        print(f"Loading trained model: {model_path}")
+        vpn = ValuePolicyNetwork(path=model_path)
+    else:
+        print("No trained models found. Using randomly initialized network.")
+        vpn = ValuePolicyNetwork()
+else:
+    print("No trained models found. Using randomly initialized network.")
+    vpn = ValuePolicyNetwork()
+
 policy_value_network = vpn.get_vp
 mcts = MonteCarloTreeSearch(game, policy_value_network)
 root_node = mcts.init_root_node()
