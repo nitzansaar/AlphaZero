@@ -1,0 +1,16 @@
+============================================================
+Bot vs Bot Self-Play - Results Summary
+============================================================
+
+Total Games:      100
+MCTS Simulations: 800 per move
+Temperature:      1.2
+Model Path:       output_tictac/models/0_best_model.pt
+
+Overall Performance:
+  Bot1 Wins:      52 (52.0%)
+  Draws:          0 (0.0%)
+  Bot2 Wins:      48 (48.0%)
+
+Bot1 first: 29W-0D-21L
+Bot2 first: 27W-0D-23L

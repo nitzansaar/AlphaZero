@@ -1,0 +1,14 @@
+============================================================
+AlphaZero Bot vs Random Player - Results Summary
+============================================================
+
+Total Games:    100
+MCTS Simulations: 800 per move
+
+Overall Performance:
+  Bot Wins:       100 (100.0%)
+  Draws:          0 (0.0%)
+  Random Wins:    0 (0.0%)
+
+Bot as Player 1 (first): 50W-0D-0L
+Bot as Player -1 (second): 50W-0D-0L
