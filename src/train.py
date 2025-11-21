@@ -19,11 +19,6 @@ if device == "cuda":
     torch.backends.cudnn.allow_tf32 = True
     # Enable cuDNN autotuner for optimal convolution algorithms
     torch.backends.cudnn.benchmark = True
-    print("GPU Optimizations Enabled:")
-    print(f"  - TF32: {torch.backends.cuda.matmul.allow_tf32}")
-    print(f"  - cuDNN Benchmark: {torch.backends.cudnn.benchmark}")
-    print(f"  - GPU: {torch.cuda.get_device_name(0)}")
-    print(f"  - GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
 
 class Trainer:
     def __init__(self, modelpath=None, use_compile=True):
@@ -37,7 +32,7 @@ class Trainer:
             self.model = torch.compile(self.model, mode="max-autotune")
             print("Model compilation complete!")
 
-        self.modelpath = modelpath
+        self.modelpath = modelpath # use the existing model 
         self.latest_file_number = -1
         if modelpath:
             try:
@@ -161,7 +156,7 @@ class Trainer:
         history.to_csv(logpath, index=None)
         print(history)
 
-        # evalutaion step
+        # evalutaion step doesnt exist yet
 
 if __name__=="__main__":
     trainer = Trainer()
