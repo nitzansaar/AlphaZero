@@ -15,22 +15,40 @@ if device == "cuda":
 
 class ValuePolicyNetwork:
     def __init__(self, path=None, use_compile=True):
-        self.model = NeuralNetwork().to(device)
+        self.original_model = NeuralNetwork().to(device)
+        
         if path:
             try:
-                self.model.load_state_dict(torch.load(path, map_location=device))
+                loaded_state = torch.load(path, map_location=device)
+                # Handle models saved with _orig_mod prefix (from torch.compile)
+                if any(key.startswith('_orig_mod.') for key in loaded_state.keys()):
+                    # Strip _orig_mod prefix
+                    new_state_dict = {}
+                    for key, value in loaded_state.items():
+                        if key.startswith('_orig_mod.'):
+                            new_key = key[len('_orig_mod.'):]
+                            new_state_dict[new_key] = value
+                        else:
+                            new_state_dict[key] = value
+                    loaded_state = new_state_dict
+                
+                self.original_model.load_state_dict(loaded_state)
                 print(f"Loaded model from {path}")
             except RuntimeError as e:
                 print(f"Warning: Could not load model from {path} (architecture mismatch)")
+                print(f"Error details: {e}")
                 print("Using randomly initialized model instead")
 
-        self.model.eval()
+        self.original_model.eval()
 
         # Compile model for faster inference on RTX 5090
+        # Do this AFTER loading so we load the uncompiled model
         if use_compile and device == "cuda" and hasattr(torch, 'compile'):
             print("Compiling inference model with torch.compile...")
-            self.model = torch.compile(self.model, mode="reduce-overhead")
+            self.model = torch.compile(self.original_model, mode="reduce-overhead")
             print("Inference model compilation complete!")
+        else:
+            self.model = self.original_model
     
     def get_vp(self, state, player=1):
         """

@@ -25,10 +25,12 @@ if all_models:
         vpn = ValuePolicyNetwork(path=model_path)
     else:
         print("No trained models found. Using randomly initialized network.")
-        vpn = ValuePolicyNetwork()
+        # vpn = ValuePolicyNetwork()
+        exit()
 else:
     print("No trained models found. Using randomly initialized network.")
-    vpn = ValuePolicyNetwork()
+    exit()
+    # vpn = ValuePolicyNetwork()
 
 policy_value_network = vpn.get_vp
 mcts = MonteCarloTreeSearch(game, policy_value_network)
