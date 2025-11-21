@@ -24,20 +24,28 @@ class Trainer:
     def __init__(self, modelpath=None, use_compile=True):
         os.makedirs(cfg.SAVE_MODEL_PATH, exist_ok = True)
         os.makedirs(cfg.LOGDIR,exist_ok = True)
-        self.model = NeuralNetwork().to(device)
-
-        # Compile model for faster execution (PyTorch 2.x feature for RTX 5090)
-        if use_compile and device == "cuda" and hasattr(torch, 'compile'):
-            print("Compiling model with torch.compile for optimized execution...")
-            self.model = torch.compile(self.model, mode="max-autotune")
-            print("Model compilation complete!")
+        self.original_model = NeuralNetwork().to(device)  # Keep original for saving/loading
+        
+        # Helper function to strip _orig_mod prefix from state dict
+        def strip_orig_mod(state_dict):
+            """Remove _orig_mod. prefix from compiled model state dict keys"""
+            new_state_dict = {}
+            for key, value in state_dict.items():
+                if key.startswith('_orig_mod.'):
+                    new_key = key[len('_orig_mod.'):]
+                    new_state_dict[new_key] = value
+                else:
+                    new_state_dict[key] = value
+            return new_state_dict
 
         self.modelpath = modelpath # use the existing model 
         self.latest_file_number = -1
         if modelpath:
             try:
-                self.model.load_state_dict(torch.load(modelpath, map_location=device)) # load the model from the modelpath
-                print(f"Loaded model from {modelpath}")
+                loaded_state = torch.load(modelpath, map_location=device)
+                loaded_state = strip_orig_mod(loaded_state)  # Handle compiled models
+                self.original_model.load_state_dict(loaded_state)
+                print(f"Model successfully loaded from {modelpath}")
             except RuntimeError as e:
                 print(f"Warning: Could not load model from {modelpath}")
                 print(f"Error: {e}")
@@ -51,8 +59,10 @@ class Trainer:
                     latest_file = os.path.join(cfg.SAVE_MODEL_PATH,cfg.BEST_MODEL.format(self.latest_file_number))
                     print("Attempting to load latest model: {}".format(latest_file))
                     try:
-                        self.model.load_state_dict(torch.load(latest_file, map_location=device))
-                        print("Successfully loaded model from {}".format(latest_file))
+                        loaded_state = torch.load(latest_file, map_location=device)
+                        loaded_state = strip_orig_mod(loaded_state)  # Handle compiled models
+                        self.original_model.load_state_dict(loaded_state)
+                        print("Model successfully loaded from {}".format(latest_file))
                     except RuntimeError as e:
                         print("Warning: Could not load model (architecture mismatch)")
                         print("This is expected if the model was trained with old architecture.")
@@ -60,8 +70,17 @@ class Trainer:
                         self.latest_file_number = -1  # Start fresh
             else:
                 savepath = os.path.join(cfg.SAVE_MODEL_PATH,cfg.BEST_MODEL.format(self.latest_file_number))
-                torch.save(self.model.state_dict(), savepath)
+                torch.save(self.original_model.state_dict(), savepath)
                 print("init.....Saving Model.....BL",savepath)
+
+        # Compile model for faster execution (PyTorch 2.x feature for RTX 5090)
+        # Do this AFTER loading so we save/load the uncompiled model
+        if use_compile and device == "cuda" and hasattr(torch, 'compile'):
+            print("Compiling model with torch.compile for optimized execution...")
+            self.model = torch.compile(self.original_model, mode="max-autotune")
+            print("Model compilation complete!")
+        else:
+            self.model = self.original_model
         
         
 
@@ -146,7 +165,8 @@ class Trainer:
             if train_loss < best_loss:
                 best_loss = train_loss
                 savepath = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(self.latest_file_number + 1))
-                torch.save(self.model.state_dict(), savepath)
+                # Save the original uncompiled model, not the compiled one
+                torch.save(self.original_model.state_dict(), savepath)
                 print("Saving Model.....BL", savepath)
             print(f"Epoch {epoch}:: Train Loss: {train_loss};")
             history.append([epoch, train_loss])
