@@ -13,14 +13,6 @@ export CUDNN_BENCHMARK=1
 # Use the new CUDA memory allocator (if PyTorch >= 1.10)
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-echo "============================================"
-echo "RTX 5090 Optimized Training Pipeline"
-echo "============================================"
-echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader -i 0)"
-echo "CUDA Version: $(nvidia-smi --query-gpu=driver_version --format=csv,noheader -i 0)"
-echo "============================================"
-echo ""
-
 echo "Starting self-play game generation..."
 python3 selfplay.py
 
