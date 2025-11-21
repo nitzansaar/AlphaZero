@@ -5,13 +5,14 @@
 export NVIDIA_TF32_OVERRIDE=1
 
 # Optimize CUDA memory allocation for better performance
-export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+# Use the new CUDA memory allocator with expandable segments
+export PYTORCH_ALLOC_CONF=max_split_size_mb:512,expandable_segments:True
 
 # Enable cuDNN auto-tuning
 export CUDNN_BENCHMARK=1
 
-# Use the new CUDA memory allocator (if PyTorch >= 1.10)
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+# Change to src directory for relative imports
+cd "$(dirname "$0")" || exit
 
 echo "Starting self-play game generation..."
 python3 selfplay.py
