@@ -3,20 +3,31 @@ import numpy as np
 import pickle
 from copy import copy
 from config import Config as cfg
+import random
 
 class TicTacToeDataset:
-    def __init__(self,dataset):
+    def __init__(self, dataset, use_augmentation=False):
         self.data = dataset
+        self.use_augmentation = use_augmentation and cfg.USE_AUGMENTATION
+        if self.use_augmentation:
+            from augmentation import get_augmentations
+            self.augmentations = get_augmentations()
     
     def __len__(self):
         return len(self.data)
     
-    def __getitem__(self,index):
+    def __getitem__(self, index):
         datapoint = self.data[index]
         state_flat = datapoint[0]  # Flat array of 81 values
         player = datapoint[2]      # Player (1 or -1)
         v = datapoint[3]           # Value target
         p = datapoint[1]           # Policy target
+        
+        # Apply data augmentation with 50% probability
+        if self.use_augmentation and random.random() < 0.5:
+            from augmentation import augment_data
+            transform_type = random.choice(self.augmentations)
+            state_flat, p = augment_data(state_flat, p, transform_type)
         
         # Convert flat state to canonical 3-plane representation
         from game import board_to_canonical_3d
