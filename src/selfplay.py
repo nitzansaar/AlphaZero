@@ -43,13 +43,24 @@ for game_number in tqdm(range(num_games),total=num_games): # play 2500 games
     node = root_node # start with an empty board
     dataset = []
     player = 1  # initialize player (game starts with player 1)
+    move_count = 0
     while game.win_or_draw(node.state) == None: # while the game is not over
         parent_state = copy(node.state)
         node = mcts.run_simulation(root_node=node, num_simulations=1600, player=player) # run mcts to find the best action
-        action, node, action_probs = mcts.select_move(node=node, mode="explore", temperature=1) # select the action with the probability of the visits
+        
+        # Temperature decay: use high temperature early, low temperature later (like AlphaGo Zero)
+        # After TEMP_THRESHOLD moves, use deterministic play (temperature -> 0)
+        if move_count < cfg.TEMP_THRESHOLD:
+            temperature = cfg.INITIAL_TEMP
+        else:
+            temperature = 0.1  # Near-deterministic for later moves
+        
+        action, node, action_probs = mcts.select_move(node=node, mode="explore", temperature=temperature) # select the action with the probability of the visits
         dataset.append([parent_state, action_probs, player]) # board state, action probabilities, player
         player = -1 * player # switch player
-    winner = game.get_reward_for_next_player(node.state, player) # assign value based on the winner
+        move_count += 1
+    # Get the actual winner from the final game state
+    winner = game.win_or_draw(node.state)  # Returns 1, -1, 0, or None
     training_dataset.add_game_to_training_dataset(dataset, winner)
     if game_number % 500 == 0: # save the training dataset every 500 games
         training_dataset.save(save_path) 

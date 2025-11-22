@@ -35,7 +35,7 @@ class Node:
             psa = child.prior_probs_P
             Ns = self.total_visits_N
             Nsa = child.total_visits_N
-            Cs = 1 # exploration constant
+            Cs = cfg.MCTS_UCB_C  # Use configurable exploration constant (sqrt(2) like AlphaGo Zero)
             Q = child.mean_action_value_of_next_state_Q 
             Uscore = Q + Cs * psa * math.sqrt(Ns) / (1 + Nsa)
             if best_uscore < Uscore: # update the best child if the new child has a higher Uscore
@@ -114,7 +114,13 @@ class MonteCarloTreeSearch:
         action_probs = np.zeros(cfg.ACTION_SIZE)
         for k, v in node.children.items():
             action_probs[k] = v.total_visits_N
-        action_probs = [action_prob / sum(action_probs) for action_prob in action_probs] # normalize the probabilities
+        # Normalize probabilities (ensure they sum to 1)
+        total_visits = np.sum(action_probs)
+        if total_visits > 0:
+            action_probs = action_probs / total_visits
+        else:
+            # Fallback: uniform distribution if no visits
+            action_probs = action_probs / len(node.children) if len(node.children) > 0 else action_probs
         return action, subtree, action_probs
         
             
