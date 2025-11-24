@@ -1,0 +1,15 @@
+============================================
+TRAINING SESSION SUMMARY
+============================================
+Start Time:     2025-11-21 15:29:41
+End Time:       2025-11-23 20:24:15
+Total Duration: 52h 54m 34s
+Total Seconds:  190474
+
+Iterations:     10
+Avg per Iter:   317m 27s
+============================================
+
+10k total self play games 
+2k epochs
+
