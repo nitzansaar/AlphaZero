@@ -8,6 +8,13 @@ import numpy as np
 from glob import glob
 from config import Config as cfg
 
+# Fix path resolution - ensure paths are relative to script location
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+if not os.path.isabs(cfg.LOGDIR):
+    cfg.LOGDIR = os.path.join(_script_dir, cfg.LOGDIR)
+if not os.path.isabs(cfg.SAVE_MODEL_PATH):
+    cfg.SAVE_MODEL_PATH = os.path.join(_script_dir, cfg.SAVE_MODEL_PATH)
+
 def load_training_history():
     """Load all training history files."""
     history_files = glob(os.path.join(cfg.LOGDIR, "*_history.csv"))
