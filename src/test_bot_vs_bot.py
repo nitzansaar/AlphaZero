@@ -90,6 +90,28 @@ def action_index_to_coords(action_index):
     col = action_index % 9
     return (row, col)
 
+def format_board_with_highlight(board_state, highlight_row=None, highlight_col=None):
+    """
+    Format board state with visible highlighting for a specific cell.
+    Args:
+        board_state: List of lists representing the board
+        highlight_row: Row index to highlight (0-8)
+        highlight_col: Column index to highlight (0-8)
+    Returns:
+        List of formatted strings, one per row
+    """
+    formatted_rows = []
+    for i, row in enumerate(board_state):
+        formatted_cells = []
+        for j, cell in enumerate(row):
+            if highlight_row is not None and highlight_col is not None and i == highlight_row and j == highlight_col:
+                # Use asterisks and brackets to make the latest move very obvious
+                formatted_cells.append(f"*{cell}*")
+            else:
+                formatted_cells.append(f" {cell} ")
+        formatted_rows.append(" ".join(formatted_cells))
+    return formatted_rows
+
 def convert_numpy_types(obj):
     """Recursively convert numpy types to native Python types for JSON serialization"""
     if isinstance(obj, np.integer):
@@ -160,7 +182,7 @@ def play_game_bot_vs_bot(game, mcts1, mcts2, num_simulations=800, temperature=1.
         visit_counts_list = [int(v) for v in visit_counts]
         top_moves = get_top_moves(visit_counts_list, top_k=5)
 
-        action, node, action_probs = current_mcts.select_move(node=root_node, mode="explore", temperature=temperature)
+        action, node, action_probs = current_mcts.select_move(node=root_node, mode="exploit", temperature=temperature)
         action_index = np.argmax(action)
 
         # Update canonicalized state
@@ -201,8 +223,24 @@ def main():
     # Initialize game
     game = TicTacToe()
 
+    # Resolve model path - handle both relative paths from script location and current working directory
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Try paths relative to script location first, then relative to current working directory
+    possible_model_dirs = [
+        os.path.join(script_dir, cfg.SAVE_MODEL_PATH),  # src/output_tictac/models
+        cfg.SAVE_MODEL_PATH,  # output_tictac/models (relative to cwd)
+        os.path.join(script_dir, "..", cfg.SAVE_MODEL_PATH),  # ../output_tictac/models
+    ]
+
     # Load the latest trained model for both bots
-    all_models = glob(os.path.join(cfg.SAVE_MODEL_PATH, "*_best_model.pt"))
+    all_models = []
+    for model_dir in possible_model_dirs:
+        if os.path.isdir(model_dir):
+            found_models = glob(os.path.join(model_dir, "*_best_model.pt"))
+            if found_models:
+                all_models.extend(found_models)
+                break
+
     model_path = None
 
     if all_models:
@@ -258,18 +296,36 @@ def main():
                     print(f"Found {len(all_models)} model(s), using highest numbered: model {latest_num}")
         else:
             # Fallback: try numbered models
-            model_path = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(1))
-            if not os.path.exists(model_path):
-                model_path = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(0))
+            for model_dir in possible_model_dirs:
+                if os.path.isdir(model_dir):
+                    test_path = os.path.join(model_dir, cfg.BEST_MODEL.format(1))
+                    if os.path.exists(test_path):
+                        model_path = test_path
+                        break
+                    test_path = os.path.join(model_dir, cfg.BEST_MODEL.format(0))
+                    if os.path.exists(test_path):
+                        model_path = test_path
+                        break
     else:
-        # No models found, try default
-        model_path = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(1))
-        if not os.path.exists(model_path):
-            model_path = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(0))
+        # No models found, try default paths
+        for model_dir in possible_model_dirs:
+            if os.path.isdir(model_dir):
+                test_path = os.path.join(model_dir, cfg.BEST_MODEL.format(1))
+                if os.path.exists(test_path):
+                    model_path = test_path
+                    break
+                test_path = os.path.join(model_dir, cfg.BEST_MODEL.format(0))
+                if os.path.exists(test_path):
+                    model_path = test_path
+                    break
 
-    if not os.path.exists(model_path):
-        print(f"ERROR: No model found at {model_path}")
-        print("Please train a model first before running bot vs bot tests.")
+    # Final check: ensure model_path exists before loading
+    if model_path is None or not os.path.exists(model_path):
+        print(f"ERROR: No model file found!")
+        print(f"Searched in:")
+        for model_dir in possible_model_dirs:
+            print(f"  - {os.path.abspath(model_dir)}")
+        print(f"\nPlease ensure you have trained a model first, or check that model files exist.")
         return
 
     print(f"Loading model from: {model_path}")
@@ -286,7 +342,7 @@ def main():
     # Test parameters
     num_games = cfg.NUM_GAMES
     num_simulations = cfg.NUM_SIMULATIONS
-    temperature = 1.2  # Add randomness to ensure varied games
+    temperature = 1  # Add randomness to ensure varied games
 
     print(f"\nTesting Bot vs Bot (Self-Play)")
     print(f"Total games: {num_games}")
@@ -368,31 +424,16 @@ def main():
         print(f"  Draws:      {bot2_first_draws} ({bot2_first_draws/len(first_bot2)*100:.1f}%)")
         print(f"  Bot1 Wins:  {bot2_first_losses} ({bot2_first_losses/len(first_bot2)*100:.1f}%)")
 
-    # Save results
-    output_dir = cfg.LOGDIR
+    # Save results to dedicated test output directory
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    output_dir = os.path.join(script_dir, "test_output")
     os.makedirs(output_dir, exist_ok=True)
-    output_file = os.path.join(output_dir, "bot_vs_bot_results.csv")
-    df_results.to_csv(output_file, index=False)
-    print(f"\nDetailed results saved to: {output_file}")
-
-    # Save game histories to JSON file
-    games_json_file = os.path.join(output_dir, "bot_vs_bot_games.json")
-    json_data = {
-        'metadata': {
-            'total_games': int(num_games),
-            'num_simulations': int(num_simulations),
-            'temperature': float(temperature),
-            'model_path': model_path,
-            'description': 'Both bots use the same trained model with temperature for variety'
-        },
-        'games': convert_numpy_types(all_games_history)
-    }
-    with open(games_json_file, 'w') as f:
-        json.dump(json_data, f, indent=2)
-    print(f"Game histories saved to: {games_json_file}")
 
     # Save a readable text version of games
     games_text_file = os.path.join(output_dir, "bot_vs_bot_games_readable.txt")
+    # Delete existing file if it exists
+    if os.path.exists(games_text_file):
+        os.remove(games_text_file)
     with open(games_text_file, 'w') as f:
         f.write("=" * 80 + "\n")
         f.write("Bot vs Bot Self-Play - Game Histories\n")
@@ -421,15 +462,19 @@ def main():
 
                 if move_num == 0:
                     f.write(f"\nInitial Board:\n")
+                    # Print board without highlighting
+                    for row in board_state:
+                        f.write("  " + " ".join(row) + "\n")
                 else:
                     if action_coords:
                         f.write(f"\nMove {move_num}: {player.upper()} plays at ({action_coords[0]}, {action_coords[1]})\n")
                     else:
                         f.write(f"\nMove {move_num}: {player.upper()}\n")
 
-                # Print board in readable format
-                for row in board_state:
-                    f.write("  " + " ".join(row) + "\n")
+                    # Print board with highlighted move
+                    highlighted_rows = format_board_with_highlight(board_state, action_coords[0] if action_coords else None, action_coords[1] if action_coords else None)
+                    for row in highlighted_rows:
+                        f.write("  " + row + "\n")
 
                 # Print visit counts for bot moves
                 if player in ['bot1', 'bot2'] and 'visit_counts_formatted' in move_data:
@@ -494,28 +539,7 @@ def main():
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "bot_vs_bot_results.png"), dpi=150)
     plt.close()
-    print(f"Results graph saved to: {os.path.join(output_dir, 'bot_vs_bot_results.png')}")
-
-    # Save summary
-    summary_file = os.path.join(output_dir, "bot_vs_bot_summary.txt")
-    with open(summary_file, 'w') as f:
-        f.write("=" * 60 + "\n")
-        f.write("Bot vs Bot Self-Play - Results Summary\n")
-        f.write("=" * 60 + "\n\n")
-        f.write(f"Total Games:      {total_games}\n")
-        f.write(f"MCTS Simulations: {num_simulations} per move\n")
-        f.write(f"Temperature:      {temperature}\n")
-        f.write(f"Model Path:       {model_path}\n\n")
-        f.write(f"Overall Performance:\n")
-        f.write(f"  Bot1 Wins:      {bot1_wins} ({bot1_wins/total_games*100:.1f}%)\n")
-        f.write(f"  Draws:          {draws} ({draws/total_games*100:.1f}%)\n")
-        f.write(f"  Bot2 Wins:      {bot2_wins} ({bot2_wins/total_games*100:.1f}%)\n\n")
-        if len(first_bot1) > 0:
-            f.write(f"Bot1 first: {bot1_first_wins}W-{bot1_first_draws}D-{bot1_first_losses}L\n")
-        if len(first_bot2) > 0:
-            f.write(f"Bot2 first: {bot2_first_wins}W-{bot2_first_draws}D-{bot2_first_losses}L\n")
-
-    print(f"Summary saved to: {summary_file}")
+    print(f"\nResults graph saved to: {os.path.join(output_dir, 'bot_vs_bot_results.png')}")
     print("\n" + "=" * 60)
     print("Testing complete!")
 

@@ -22,7 +22,7 @@ class Config:
     EVAL_GAMES = 40
     ACTION_SIZE = 81 # number of possible actions (9x9 board)
     NUM_GAMES = 100
-    NUM_SIMULATIONS = 800
+    NUM_SIMULATIONS = 1600
     
     # AlphaGo Zero specific parameters
     MCTS_UCB_C = 1.414  # sqrt(2) - exploration constant for UCB formula
