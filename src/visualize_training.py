@@ -26,6 +26,10 @@ if not os.path.isabs(cfg.LOGDIR):
     # If LOGDIR is relative, make it relative to script directory
     cfg.LOGDIR = os.path.join(_script_dir, cfg.LOGDIR)
 
+# Output directory for visualizations
+output_dir = os.path.join(_script_dir, "test_output")
+os.makedirs(output_dir, exist_ok=True)
+
 def create_combined_loss_graph():
     """Create a single graph showing combined loss across all training iterations."""
     history = load_training_history()
@@ -86,7 +90,7 @@ def create_combined_loss_graph():
     ax.grid(True, alpha=0.3)
     
     # Save figure
-    output_path = os.path.join(cfg.LOGDIR, 'training_loss_combined.png')
+    output_path = os.path.join(output_dir, 'training_loss_combined.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
     print(f"✓ Combined loss graph saved to: {output_path}")
     plt.close()
@@ -100,7 +104,7 @@ def main():
     try:
         create_combined_loss_graph()
         print("\n✓ Visualization generated successfully!")
-        print(f"\nView visualization in: {cfg.LOGDIR}")
+        print(f"\nView visualization in: {output_dir}")
     except Exception as e:
         print(f"\n✗ Error generating visualization: {e}")
         import traceback
