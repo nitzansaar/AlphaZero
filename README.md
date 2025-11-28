@@ -2,7 +2,7 @@
 
 A general N×N K-in-a-row game agent that learns to play optimally via self-play, guided by a policy/value neural network and Monte Carlo Tree Search (MCTS).
 
-Currently support 9 by 9, 5 in a row tictactoe 
+Currently support 9 by 9, 5 in a row tictactoe (Gomoku)
 
 Never loses to random play
 
