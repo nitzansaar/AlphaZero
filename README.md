@@ -10,7 +10,6 @@ Never loses to random play
 ## Project Overview
 
 This project implements a complete AlphaZero-inspired reinforcement learning system that:
-- Plays generalized tic-tac-toe on any N×N board
 - Learns optimal strategies through MCTS-guided self-play
 - Uses dual-head neural network (policy + value)
 
