@@ -1,8 +1,8 @@
-# AlphaZero-style N×N K-in-a-row Agent
+# AlphaZero-style Connect Five Agent
 
 A general N×N K-in-a-row game agent that learns to play optimally via self-play, guided by a policy/value neural network and Monte Carlo Tree Search (MCTS).
 
-Currently support 9 by 9, 5 in a row tictactoe (Gomoku)
+Currently support 9 by 9, 5 in a row Connect Five
 
 Never loses to random play
 
