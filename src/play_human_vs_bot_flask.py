@@ -29,7 +29,10 @@ def load_model():
     Load the latest trained model.
     Returns the model path or None if no model found.
     """
-    all_models = glob(os.path.join("output_tictac/models", "*_best_model.pt"))
+    # Look for models relative to this script's location
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    models_dir = os.path.join(script_dir, "output_tictac/models")
+    all_models = glob(os.path.join(models_dir, "*_best_model.pt"))
     model_path = None
 
     if all_models:
