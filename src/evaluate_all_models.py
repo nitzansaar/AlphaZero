@@ -11,7 +11,6 @@ from mcts import MonteCarloTreeSearch
 from value_policy_function import ValuePolicyNetwork
 from model import NeuralNetwork
 import matplotlib.pyplot as plt
-from test_vs_random import RandomPlayer, play_game_bot_first, play_game_random_first
 from minimax_player import MinimaxPlayer
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -95,9 +94,9 @@ def play_game_minimax_first(game, mcts, minimax_player, num_simulations=1600):
     return 1 if winner == -1 else -1
 
 
-def evaluate_model(model_path, game, opponent="random", num_games=100, num_simulations=400):
+def evaluate_model(model_path, game, num_games=100, num_simulations=400):
     """
-    Evaluate a single model against an opponent ("random" or "minimax").
+    Evaluate a single model against minimax opponent.
     Returns: dict with win/loss/draw statistics
     """
     try:
@@ -106,20 +105,11 @@ def evaluate_model(model_path, game, opponent="random", num_games=100, num_simul
         policy_value_network = vpn.get_vp
         mcts = MonteCarloTreeSearch(game, policy_value_network)
 
-        if opponent == "random":
-            opponent_player = RandomPlayer(game)
-            play_first = lambda: play_game_bot_first(game, mcts, opponent_player, num_simulations)
-            play_second = lambda: play_game_random_first(game, mcts, opponent_player, num_simulations)
-            opponent_label = "random"
-            opponent_wins_key = "random_wins"
-        elif opponent == "minimax":
-            opponent_player = MinimaxPlayer(game, depth=2, radius=1, max_candidates=24)
-            play_first = lambda: (play_game_bot_first_vs_minimax(game, mcts, opponent_player, num_simulations), None)
-            play_second = lambda: (play_game_minimax_first(game, mcts, opponent_player, num_simulations), None)
-            opponent_label = "minimax"
-            opponent_wins_key = "minimax_wins"
-        else:
-            raise ValueError(f"Unknown opponent: {opponent}")
+        opponent_player = MinimaxPlayer(game, depth=2, radius=1, max_candidates=24)
+        play_first = lambda: (play_game_bot_first_vs_minimax(game, mcts, opponent_player, num_simulations), None)
+        play_second = lambda: (play_game_minimax_first(game, mcts, opponent_player, num_simulations), None)
+        opponent_label = "minimax"
+        opponent_wins_key = "minimax_wins"
 
         results = []
 
@@ -269,39 +259,22 @@ def main():
 
     # Evaluation parameters
     num_games = 50  # Games per model (reduced for faster evaluation)
-    num_simulations_random = 200   # MCTS simulations per move vs random (fast baseline)
     num_simulations_minimax = 1600  # MCTS simulations per move vs minimax (strong baseline)
 
     print(f"\nEvaluation settings:")
     print(f"  Games per model: {num_games}")
-    print(f"  MCTS simulations vs random:  {num_simulations_random}")
     print(f"  MCTS simulations vs minimax: {num_simulations_minimax}")
-    print(f"  Total games played: {len(models_with_numbers) * num_games * 2}")
+    print(f"  Total games played: {len(models_with_numbers) * num_games}")
     print("=" * 60)
 
     # Evaluate each model
-    evaluation_results_random = []
     evaluation_results_minimax = []
 
     for iteration_num, model_path in tqdm(models_with_numbers, desc="Evaluating models"):
         print(f"\nEvaluating iteration {iteration_num}...")
-        stats_random = evaluate_model(
-            model_path,
-            game,
-            opponent="random",
-            num_games=num_games,
-            num_simulations=num_simulations_random,
-        )
-        if stats_random:
-            stats_random['iteration'] = iteration_num
-            stats_random['model_path'] = model_path
-            evaluation_results_random.append(stats_random)
-            print(f"  vs Random : Win {stats_random['win_rate']:.1f}% | Draw {stats_random['draw_rate']:.1f}% | Loss {stats_random['loss_rate']:.1f}%")
-
         stats_minimax = evaluate_model(
             model_path,
             game,
-            opponent="minimax",
             num_games=num_games,
             num_simulations=num_simulations_minimax,
         )
@@ -315,14 +288,6 @@ def main():
     output_dir = os.path.join(script_dir, "test_output")
     os.makedirs(output_dir, exist_ok=True)
 
-    df_random = save_results_and_visualization(
-        evaluation_results_random,
-        output_dir=output_dir,
-        opponent_label="random",
-        opponent_wins_col="random_wins",
-        csv_name="model_progression_vs_random.csv",
-        plot_name="training_progression_vs_random.png",
-    )
     df_minimax = save_results_and_visualization(
         evaluation_results_minimax,
         output_dir=output_dir,
@@ -332,7 +297,6 @@ def main():
         plot_name="training_progression_vs_minimax.png",
     )
 
-    print_evaluation_summary(df_random, "random")
     print_evaluation_summary(df_minimax, "minimax")
 
     print("\n" + "=" * 60)
