@@ -44,6 +44,42 @@
             cursor: pointer;
             font-size: 12px;
         }
+        #visit-counts-container {
+            width: 720px;
+            margin: 10px 0;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            display: none;
+        }
+        #visit-counts-container h3 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            color: #333;
+        }
+        #visit-counts-list {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .visit-count-item {
+            padding: 3px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .visit-count-item:last-child {
+            border-bottom: none;
+        }
+        .visit-count-position {
+            display: inline-block;
+            width: 60px;
+            font-weight: bold;
+            color: #2196F3;
+        }
+        .visit-count-value {
+            color: #666;
+        }
         #controls {
             margin: 10px 0;
         }
@@ -141,6 +177,11 @@
         </label>
     </div>
 
+    <div id="visit-counts-container">
+        <h3>MCTS Visit Counts</h3>
+        <div id="visit-counts-list"></div>
+    </div>
+
     <div id="controls">
         <button class="new-game-btn" onclick="newGame()">New Game</button>
         <button class="settings-btn" onclick="goToSettings()">Settings</button>
@@ -180,6 +221,7 @@
         canvas.addEventListener('click', handleClick);
         canvas.addEventListener('mousemove', handleMouseMove);
         document.getElementById('showHeatmap').addEventListener('change', () => {
+            updateVisitCountsDisplay();
             drawBoard();
         });
 
@@ -189,6 +231,7 @@
                 .then(data => {
                     gameState = data;
                     updateStatus();
+                    updateVisitCountsDisplay();
                     drawBoard();
 
                     // If it's bot's turn and game not over, make bot move
@@ -220,6 +263,51 @@
                 statusDiv.className = 'bot-thinking';
                 statusDiv.textContent = `Bot thinking... (${symbol})`;
             }
+        }
+
+        function updateVisitCountsDisplay() {
+            const container = document.getElementById('visit-counts-container');
+            const listDiv = document.getElementById('visit-counts-list');
+            const showHeatmap = document.getElementById('showHeatmap').checked;
+
+            if (!gameState || !showHeatmap || !gameState.last_mcts_visit_counts) {
+                container.style.display = 'none';
+                return;
+            }
+
+            container.style.display = 'block';
+
+            // Collect all positions with visit counts
+            const visitData = [];
+            for (let i = 0; i < gameState.last_mcts_visit_counts.length; i++) {
+                const visits = gameState.last_mcts_visit_counts[i];
+                if (visits > 0) {
+                    const row = Math.floor(i / 9);
+                    const col = i % 9;
+                    visitData.push({
+                        position: `(${row},${col})`,
+                        index: i,
+                        visits: visits
+                    });
+                }
+            }
+
+            // Sort by visit count (descending)
+            visitData.sort((a, b) => b.visits - a.visits);
+
+            // Build HTML
+            let html = '';
+            for (let i = 0; i < visitData.length; i++) {
+                const data = visitData[i];
+                const isChosen = data.index === gameState.last_mcts_chosen_action_index;
+                const marker = isChosen ? ' ← chosen' : '';
+                html += `<div class="visit-count-item">`;
+                html += `<span class="visit-count-position">${data.position}</span>`;
+                html += `<span class="visit-count-value">${data.visits} visits${marker}</span>`;
+                html += `</div>`;
+            }
+
+            listDiv.innerHTML = html || '<div style="color: #999;">No MCTS data available</div>';
         }
 
         function drawBoard() {
