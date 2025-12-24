@@ -1,15 +1,8 @@
 {
-  "version": 2,
-  "builds": [
+  "rewrites": [
     {
-      "src": "src/play_human_vs_bot_flask.py",
-      "use": "@vercel/python"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "src/play_human_vs_bot_flask.py"
+      "source": "/(.*)",
+      "destination": "/src/play_human_vs_bot_flask"
     }
   ],
   "functions": {
