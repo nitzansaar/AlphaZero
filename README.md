@@ -19,8 +19,7 @@ This project implements a complete AlphaZero-inspired reinforcement learning sys
 - ./train.sh
 
 ## Play against the bot (Human vs Bot)
-- cd src
-- python3 play_human_vs_bot.py
+- python3 src/play_human_vs_bot_flask.py 
 
 ## Simulate play versus random player
 - cd src
@@ -29,5 +28,3 @@ This project implements a complete AlphaZero-inspired reinforcement learning sys
 ## Simulate play vs bot
 - cd src
 - python3 test_bot_vs_bot.py
-
-
