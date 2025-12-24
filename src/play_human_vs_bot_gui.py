@@ -104,6 +104,9 @@ class TicTacToeGUI:
         self.canvas = None
         self.status_label = None
         self.info_text = None
+        self.heatmap_var = tk.BooleanVar(value=True)
+        self._last_mcts_visit_counts = None
+        self._last_mcts_chosen_action_index = None
 
         # Visual settings
         self.cell_size = 80
@@ -351,26 +354,18 @@ class TicTacToeGUI:
         self.canvas.bind("<Button-1>", self.handle_board_click)
         self.canvas.bind("<Motion>", self.handle_mouse_motion)
 
-        # Info panel
-        info_frame = tk.Frame(main_frame, bg="#F0F0F0")
-        info_frame.pack(fill=tk.X, padx=20, pady=10)
+        heatmap_frame = tk.Frame(main_frame, bg="#F0F0F0")
+        heatmap_frame.pack(fill=tk.X, padx=20)
 
-        info_label = tk.Label(
-            info_frame,
-            text="Game Info:",
-            font=("Arial", 12, "bold"),
+        heatmap_toggle = tk.Checkbutton(
+            heatmap_frame,
+            text="Show MCTS heatmap (last bot search)",
+            variable=self.heatmap_var,
+            command=self._refresh_heatmap_overlay,
+            font=("Arial", 10),
             bg="#F0F0F0"
         )
-        info_label.pack(anchor=tk.W)
-
-        self.info_text = tk.Text(
-            info_frame,
-            height=4,
-            font=("Courier", 10),
-            bg="white",
-            state=tk.DISABLED
-        )
-        self.info_text.pack(fill=tk.X)
+        heatmap_toggle.pack(anchor=tk.W)
 
         # Control buttons
         button_frame = tk.Frame(main_frame, bg="#F0F0F0")
@@ -462,6 +457,7 @@ class TicTacToeGUI:
         # Remove all pieces (keep grid)
         self.canvas.delete("piece")
         self.canvas.delete("highlight")
+        self.canvas.delete("hover")
 
         # Draw pieces
         state_2d = self.state.reshape(9, 9)
@@ -471,6 +467,73 @@ class TicTacToeGUI:
                     self.draw_x(row, col)
                 elif state_2d[row, col] == -1:
                     self.draw_o(row, col)
+
+        self._refresh_heatmap_overlay()
+
+    @staticmethod
+    def _lerp_color(c0, c1, t):
+        t = 0.0 if t < 0 else (1.0 if t > 1 else t)
+        r0, g0, b0 = c0
+        r1, g1, b1 = c1
+        r = int(r0 + (r1 - r0) * t)
+        g = int(g0 + (g1 - g0) * t)
+        b = int(b0 + (b1 - b0) * t)
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    def _refresh_heatmap_overlay(self):
+        if not self.canvas:
+            return
+        self.canvas.delete("heatmap")
+        self.canvas.delete("heatmap_text")
+        if not self.heatmap_var.get():
+            return
+        if self._last_mcts_visit_counts is None:
+            return
+
+        valid_moves = self.game.get_valid_moves(self.state.copy())
+        visit_counts = self._last_mcts_visit_counts.copy()
+        visit_counts = visit_counts * valid_moves
+        max_visits = float(np.max(visit_counts)) if visit_counts.size else 0.0
+        if max_visits <= 0:
+            return
+
+        low = (255, 255, 255)
+        high = (255, 170, 0)
+
+        for action_index in np.flatnonzero(valid_moves):
+            v = float(visit_counts[action_index])
+            if v <= 0:
+                continue
+            t = v / max_visits
+            row, col = divmod(int(action_index), 9)
+            x1 = col * self.cell_size + 3
+            y1 = row * self.cell_size + 3
+            x2 = (col + 1) * self.cell_size - 3
+            y2 = (row + 1) * self.cell_size - 3
+
+            fill = self._lerp_color(low, high, t)
+            self.canvas.create_rectangle(
+                x1, y1, x2, y2,
+                fill=fill,
+                outline="",
+                tags="heatmap"
+            )
+
+        if self._last_mcts_chosen_action_index is not None:
+            a = int(self._last_mcts_chosen_action_index)
+            row, col = divmod(a, 9)
+            x1 = col * self.cell_size + 5
+            y1 = row * self.cell_size + 5
+            x2 = (col + 1) * self.cell_size - 5
+            y2 = (row + 1) * self.cell_size - 5
+            self.canvas.create_rectangle(
+                x1, y1, x2, y2,
+                outline="#ff0000",
+                width=3,
+                tags="heatmap"
+            )
+
+        self.canvas.tag_lower("heatmap")
 
     def draw_x(self, row, col):
         """Draw an X at the specified position."""
@@ -663,10 +726,16 @@ class TicTacToeGUI:
             top_indices = np.argsort(visit_counts)[::-1][:3]
 
             # Update UI on main thread
-            self.root.after(0, lambda: self._apply_bot_move(action_index, top_indices, visit_counts))
+            self.root.after(0, lambda: self._set_last_mcts_and_apply(action_index, top_indices, visit_counts))
 
         except Exception as e:
             self.root.after(0, lambda: self.handle_bot_error(str(e)))
+
+    def _set_last_mcts_and_apply(self, action_index, top_indices, visit_counts):
+        self._last_mcts_visit_counts = visit_counts
+        self._last_mcts_chosen_action_index = action_index
+        self._refresh_heatmap_overlay()
+        self._apply_bot_move(action_index, top_indices, visit_counts)
 
     def _apply_bot_move(self, action_index, top_indices, visit_counts):
         """Apply bot move to the game state (called on main thread)."""
@@ -851,6 +920,8 @@ class TicTacToeGUI:
 
     def add_info(self, text):
         """Add text to the info panel."""
+        if self.info_text is None:
+            return
         self.info_text.config(state=tk.NORMAL)
         self.info_text.insert(tk.END, text + "\n")
         self.info_text.see(tk.END)

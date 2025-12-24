@@ -13,7 +13,7 @@ class Node:
         self.prior_probs_P = prior_prob # prior probability of the action
         self.children = {} # children of the node
         self.parent = parent # parent of the node
-        if action_index:            
+        if action_index is not None:
             state = copy(parent.state) * -1
             state[action_index] = -1
             self.state = copy(state)
