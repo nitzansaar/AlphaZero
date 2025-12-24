@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>9x9 Tic-Tac-Toe - Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #F0F0F0;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #status {
+            width: 720px;
+            background-color: #90EE90;
+            color: black;
+            text-align: center;
+            font-size: 18px;
+            font-weight: bold;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+        }
+        #status.bot-thinking {
+            background-color: #FFFF99;
+        }
+        #canvas-container {
+            margin: 10px 0;
+        }
+        #gameCanvas {
+            background: white;
+            border: 2px solid #333;
+            cursor: pointer;
+        }
+        #heatmap-container {
+            width: 720px;
+            margin: 10px 0;
+        }
+        #heatmap-container label {
+            cursor: pointer;
+            font-size: 12px;
+        }
+        #controls {
+            margin: 10px 0;
+        }
+        button {
+            font-size: 14px;
+            padding: 8px 20px;
+            margin: 0 5px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        button:hover {
+            opacity: 0.9;
+        }
+        .new-game-btn {
+            background-color: #2196F3;
+            color: white;
+        }
+        .settings-btn {
+            background-color: #9E9E9E;
+            color: white;
+        }
+        .quit-btn {
+            background-color: #f44336;
+            color: white;
+        }
+
+        /* Game Over Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.4);
+        }
+        .modal-content {
+            background-color: #fefefe;
+            margin: 10% auto;
+            padding: 0;
+            border-radius: 10px;
+            width: 400px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .modal-header {
+            padding: 30px;
+            text-align: center;
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            border-radius: 10px 10px 0 0;
+        }
+        .modal-header.win {
+            background-color: #4CAF50;
+        }
+        .modal-header.lose {
+            background-color: #f44336;
+        }
+        .modal-header.draw {
+            background-color: #9E9E9E;
+        }
+        .modal-body {
+            padding: 20px;
+        }
+        .modal-button {
+            width: 100%;
+            padding: 12px;
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        .play-again-btn {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .switch-sides-btn {
+            background-color: #2196F3;
+            color: white;
+        }
+        .main-menu-btn {
+            background-color: #9E9E9E;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div id="status">Loading...</div>
+
+    <div id="canvas-container">
+        <canvas id="gameCanvas" width="720" height="720"></canvas>
+    </div>
+
+    <div id="heatmap-container">
+        <label>
+            <input type="checkbox" id="showHeatmap" checked>
+            Show MCTS heatmap (last bot search)
+        </label>
+    </div>
+
+    <div id="controls">
+        <button class="new-game-btn" onclick="newGame()">New Game</button>
+    </div>
+
+    <!-- Game Over Modal -->
+    <div id="gameOverModal" class="modal">
+        <div class="modal-content">
+            <div id="modalHeader" class="modal-header">Game Over</div>
+            <div class="modal-body">
+                <button class="modal-button play-again-btn" onclick="playAgain()">Play Again</button>
+                <button class="modal-button switch-sides-btn" onclick="switchSides()">Switch Sides</button>
+                <button class="modal-button main-menu-btn" onclick="mainMenu()">Main Menu</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const CELL_SIZE = 80;
+        const BOARD_SIZE = 9;
+        const COLOR_X = '#FF0000';
+        const COLOR_O = '#0000FF';
+        const COLOR_GRID = '#333333';
+        const COLOR_HIGHLIGHT = '#FFFFCC';
+
+        let gameState = null;
+        let hoverRow = -1;
+        let hoverCol = -1;
+        let processingMove = false;
+
+        // Initialize
+        loadGameState();
+
+        // Event listeners
+        canvas.addEventListener('click', handleClick);
+        canvas.addEventListener('mousemove', handleMouseMove);
+        document.getElementById('showHeatmap').addEventListener('change', () => {
+            drawBoard();
+        });
+
+        function loadGameState() {
+            fetch('/get_state')
+                .then(response => response.json())
+                .then(data => {
+                    gameState = data;
+                    updateStatus();
+                    drawBoard();
+
+                    // If it's bot's turn and game not over, make bot move
+                    if (!data.is_human_turn && !data.game_over && !processingMove) {
+                        setTimeout(makeBotMove, 500);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading game state:', error);
+                });
+        }
+
+        function updateStatus() {
+            const statusDiv = document.getElementById('status');
+            if (gameState.game_over) {
+                statusDiv.className = '';
+                statusDiv.textContent = 'Game Over';
+                return;
+            }
+
+            if (gameState.is_human_turn) {
+                const symbol = gameState.human_player === 1 ? 'X' : 'O';
+                statusDiv.className = '';
+                statusDiv.textContent = `Your turn (${symbol})`;
+            } else {
+                const symbol = gameState.current_player === 1 ? 'X' : 'O';
+                statusDiv.className = 'bot-thinking';
+                statusDiv.textContent = `Bot thinking... (${symbol})`;
+            }
+        }
+
+        function drawBoard() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw heatmap first (if enabled)
+            if (document.getElementById('showHeatmap').checked && gameState.last_mcts_visit_counts) {
+                drawHeatmap();
+            }
+
+            // Draw hover highlight
+            if (hoverRow >= 0 && hoverCol >= 0 && gameState.is_human_turn && !gameState.game_over) {
+                const actionIndex = hoverRow * 9 + hoverCol;
+                if (gameState.valid_moves[actionIndex] === 1) {
+                    ctx.fillStyle = COLOR_HIGHLIGHT;
+                    ctx.fillRect(
+                        hoverCol * CELL_SIZE + 2,
+                        hoverRow * CELL_SIZE + 2,
+                        CELL_SIZE - 4,
+                        CELL_SIZE - 4
+                    );
+                }
+            }
+
+            // Draw grid
+            ctx.strokeStyle = COLOR_GRID;
+            ctx.lineWidth = 2;
+            for (let i = 0; i <= BOARD_SIZE; i++) {
+                // Vertical lines
+                ctx.beginPath();
+                ctx.moveTo(i * CELL_SIZE, 0);
+                ctx.lineTo(i * CELL_SIZE, BOARD_SIZE * CELL_SIZE);
+                ctx.stroke();
+
+                // Horizontal lines
+                ctx.beginPath();
+                ctx.moveTo(0, i * CELL_SIZE);
+                ctx.lineTo(BOARD_SIZE * CELL_SIZE, i * CELL_SIZE);
+                ctx.stroke();
+            }
+
+            // Draw pieces
+            for (let row = 0; row < 9; row++) {
+                for (let col = 0; col < 9; col++) {
+                    const idx = row * 9 + col;
+                    if (gameState.state[idx] === 1) {
+                        drawX(row, col);
+                    } else if (gameState.state[idx] === -1) {
+                        drawO(row, col);
+                    }
+                }
+            }
+        }
+
+        function drawHeatmap() {
+            if (!gameState.last_mcts_visit_counts) return;
+
+            const visitCounts = gameState.last_mcts_visit_counts.slice();
+            let maxVisits = 0;
+            for (let i = 0; i < visitCounts.length; i++) {
+                if (gameState.valid_moves[i] === 1 && visitCounts[i] > maxVisits) {
+                    maxVisits = visitCounts[i];
+                }
+            }
+
+            if (maxVisits <= 0) return;
+
+            for (let i = 0; i < visitCounts.length; i++) {
+                if (gameState.valid_moves[i] === 1 && visitCounts[i] > 0) {
+                    const t = visitCounts[i] / maxVisits;
+                    const row = Math.floor(i / 9);
+                    const col = i % 9;
+
+                    // Interpolate color from white to orange
+                    const r = 255;
+                    const g = Math.floor(255 - (255 - 170) * t);
+                    const b = Math.floor(255 * (1 - t));
+
+                    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                    ctx.fillRect(
+                        col * CELL_SIZE + 3,
+                        row * CELL_SIZE + 3,
+                        CELL_SIZE - 6,
+                        CELL_SIZE - 6
+                    );
+                }
+            }
+
+            // Draw red outline around chosen action
+            if (gameState.last_mcts_chosen_action_index !== null) {
+                const idx = gameState.last_mcts_chosen_action_index;
+                const row = Math.floor(idx / 9);
+                const col = idx % 9;
+
+                ctx.strokeStyle = '#ff0000';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(
+                    col * CELL_SIZE + 5,
+                    row * CELL_SIZE + 5,
+                    CELL_SIZE - 10,
+                    CELL_SIZE - 10
+                );
+            }
+        }
+
+        function drawX(row, col) {
+            const x1 = col * CELL_SIZE + 15;
+            const y1 = row * CELL_SIZE + 15;
+            const x2 = col * CELL_SIZE + CELL_SIZE - 15;
+            const y2 = row * CELL_SIZE + CELL_SIZE - 15;
+
+            ctx.strokeStyle = COLOR_X;
+            ctx.lineWidth = 4;
+
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(x2, y1);
+            ctx.lineTo(x1, y2);
+            ctx.stroke();
+        }
+
+        function drawO(row, col) {
+            const cx = col * CELL_SIZE + CELL_SIZE / 2;
+            const cy = row * CELL_SIZE + CELL_SIZE / 2;
+            const radius = CELL_SIZE / 2 - 15;
+
+            ctx.strokeStyle = COLOR_O;
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
+            ctx.stroke();
+        }
+
+        function handleClick(event) {
+            if (!gameState.is_human_turn || gameState.game_over || processingMove) {
+                return;
+            }
+
+            const rect = canvas.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+
+            const col = Math.floor(x / CELL_SIZE);
+            const row = Math.floor(y / CELL_SIZE);
+
+            if (row < 0 || row >= 9 || col < 0 || col >= 9) {
+                return;
+            }
+
+            const actionIndex = row * 9 + col;
+
+            if (gameState.valid_moves[actionIndex] !== 1) {
+                showInvalidMove(row, col);
+                return;
+            }
+
+            makeHumanMove(actionIndex);
+        }
+
+        function handleMouseMove(event) {
+            const rect = canvas.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+
+            const col = Math.floor(x / CELL_SIZE);
+            const row = Math.floor(y / CELL_SIZE);
+
+            if (hoverRow !== row || hoverCol !== col) {
+                hoverRow = row;
+                hoverCol = col;
+                drawBoard();
+            }
+        }
+
+        function showInvalidMove(row, col) {
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(
+                col * CELL_SIZE + 2,
+                row * CELL_SIZE + 2,
+                CELL_SIZE - 4,
+                CELL_SIZE - 4
+            );
+            setTimeout(() => drawBoard(), 500);
+        }
+
+        function makeHumanMove(actionIndex) {
+            processingMove = true;
+
+            fetch('/make_move', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ action_index: actionIndex })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    loadGameState();
+
+                    if (data.game_over) {
+                        showGameOver(data.result);
+                    } else {
+                        // Bot's turn
+                        setTimeout(() => {
+                            processingMove = false;
+                            makeBotMove();
+                        }, 300);
+                    }
+                } else {
+                    processingMove = false;
+                    alert('Invalid move: ' + data.error);
+                }
+            })
+            .catch(error => {
+                processingMove = false;
+                console.error('Error making move:', error);
+            });
+        }
+
+        function makeBotMove() {
+            if (processingMove) return;
+            processingMove = true;
+            updateStatus();
+
+            fetch('/bot_move', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({})
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    loadGameState();
+
+                    if (data.game_over) {
+                        showGameOver(data.result);
+                    }
+                    processingMove = false;
+                } else {
+                    processingMove = false;
+                    alert('Bot error: ' + data.error);
+                }
+            })
+            .catch(error => {
+                processingMove = false;
+                console.error('Error making bot move:', error);
+            });
+        }
+
+        function showGameOver(result) {
+            const modal = document.getElementById('gameOverModal');
+            const header = document.getElementById('modalHeader');
+
+            if (result === 1) {
+                if (gameState.human_player === 1) {
+                    header.textContent = 'Congratulations!\nYou won!';
+                    header.className = 'modal-header win';
+                } else {
+                    header.textContent = 'Bot (X) wins!';
+                    header.className = 'modal-header lose';
+                }
+            } else if (result === -1) {
+                if (gameState.human_player === -1) {
+                    header.textContent = 'Congratulations!\nYou won!';
+                    header.className = 'modal-header win';
+                } else {
+                    header.textContent = 'Bot (O) wins!';
+                    header.className = 'modal-header lose';
+                }
+            } else {
+                header.textContent = "It's a draw!";
+                header.className = 'modal-header draw';
+            }
+
+            modal.style.display = 'block';
+        }
+
+        function playAgain() {
+            document.getElementById('gameOverModal').style.display = 'none';
+            newGame();
+        }
+
+        function switchSides() {
+            document.getElementById('gameOverModal').style.display = 'none';
+            // Switch human player and start new game
+            fetch('/start_game', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    human_player: -gameState.human_player,
+                    num_simulations: gameState.num_simulations || 800
+                })
+            })
+            .then(() => {
+                window.location.reload();
+            });
+        }
+
+        function mainMenu() {
+            window.location.href = '/';
+        }
+
+        function newGame() {
+            window.location.href = '/';
+        }
+
+        function goToSettings() {
+            window.location.href = '/';
+        }
+    </script>
+</body>
+</html>
