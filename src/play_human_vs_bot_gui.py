@@ -162,7 +162,7 @@ class TicTacToeGUI:
 
         human_first_rb = tk.Radiobutton(
             settings_frame,
-            text="I go first (X)",
+            text="I go first",
             variable=self.human_player,
             value=1,
             font=("Arial", 12),
@@ -172,7 +172,7 @@ class TicTacToeGUI:
 
         bot_first_rb = tk.Radiobutton(
             settings_frame,
-            text="Bot goes first (O goes second)",
+            text="Bot goes first",
             variable=self.human_player,
             value=-1,
             font=("Arial", 12),
@@ -191,7 +191,7 @@ class TicTacToeGUI:
 
         easy_rb = tk.Radiobutton(
             settings_frame,
-            text="Easy (200 simulations)",
+            text="Easy",
             variable=self.num_simulations,
             value=200,
             font=("Arial", 12),
@@ -201,7 +201,7 @@ class TicTacToeGUI:
 
         medium_rb = tk.Radiobutton(
             settings_frame,
-            text="Medium (400 simulations)",
+            text="Medium",
             variable=self.num_simulations,
             value=400,
             font=("Arial", 12),
@@ -211,7 +211,7 @@ class TicTacToeGUI:
 
         hard_rb = tk.Radiobutton(
             settings_frame,
-            text="Hard (800 simulations)",
+            text="Hard",
             variable=self.num_simulations,
             value=800,
             font=("Arial", 12),
@@ -221,7 +221,7 @@ class TicTacToeGUI:
 
         expert_rb = tk.Radiobutton(
             settings_frame,
-            text="Expert (1600 simulations)",
+            text="Expert",
             variable=self.num_simulations,
             value=1600,
             font=("Arial", 12),
