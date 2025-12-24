@@ -41,9 +41,11 @@ venv/
 data/models/
 data/self_play/
 *.pth
-*.pt
 *.ckpt
 *.h5
+
+# Allow trained models for deployment
+!src/output_tictac/models/*.pt
 
 # Logs
 *.log
