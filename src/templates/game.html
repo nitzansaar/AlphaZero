@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>9x9 Tic-Tac-Toe - Game</title>
+    <title>Connect Five</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -147,6 +147,8 @@
 
     <div id="controls">
         <button class="new-game-btn" onclick="newGame()">New Game</button>
+        <button class="settings-btn" onclick="goToSettings()">Settings</button>
+        <button class="quit-btn" onclick="window.close()">Quit</button>
     </div>
 
     <!-- Game Over Modal -->
@@ -534,7 +536,7 @@
         }
 
         function newGame() {
-            window.location.href = '/';
+            window.location.reload();
         }
 
         function goToSettings() {
