@@ -207,6 +207,8 @@
         }
 
         function updateStatus() {
+            if (!gameState) return; // Guard against null gameState
+
             const statusDiv = document.getElementById('status');
             if (gameState.game_over) {
                 statusDiv.className = '';
@@ -226,6 +228,8 @@
         }
 
         function drawBoard() {
+            if (!gameState) return; // Guard against null gameState
+
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
             // Draw heatmap first (if enabled)
