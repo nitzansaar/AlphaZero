@@ -183,8 +183,7 @@
     </div>
 
     <div id="controls">
-        <button class="new-game-btn" onclick="newGame()">New Game</button>
-        <button class="settings-btn" onclick="goToSettings()">Settings</button>
+        <button class="new-game-btn" onclick="goToSettings()">Main Menu</button>
     </div>
 
     <!-- Game Over Modal -->
@@ -597,7 +596,20 @@
 
         function playAgain() {
             document.getElementById('gameOverModal').style.display = 'none';
-            newGame();
+            // Start a new game with the same settings
+            fetch('/start_game', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    human_player: gameState.human_player,
+                    num_simulations: gameState.num_simulations || 1600
+                })
+            })
+            .then(() => {
+                window.location.reload();
+            });
         }
 
         function switchSides() {

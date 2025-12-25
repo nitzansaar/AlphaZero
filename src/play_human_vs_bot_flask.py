@@ -126,7 +126,7 @@ def start_game():
     try:
         # Get settings
         human_player = int(request.json.get('human_player', 1))
-        num_simulations = int(request.json.get('num_simulations', 800))
+        num_simulations = int(request.json.get('num_simulations', 1600))
 
         # Initialize game components
         game, mcts, policy_value_network = initialize_game()
@@ -180,7 +180,7 @@ def get_state():
         'game_over': game_over,
         'result': result,
         'valid_moves': valid_moves,
-        'num_simulations': session.get('num_simulations', 800),
+        'num_simulations': session.get('num_simulations', 1600),
         'last_mcts_visit_counts': session.get('last_mcts_visit_counts'),
         'last_mcts_chosen_action_index': session.get('last_mcts_chosen_action_index')
     })
