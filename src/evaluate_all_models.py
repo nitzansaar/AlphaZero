@@ -40,7 +40,7 @@ def play_game_bot_first_vs_minimax(game, mcts, minimax_player, num_simulations=1
             node = Node(prior_prob=0, player=player, action_index=None)
             node.set_state(state.copy())
             root_node = mcts.run_simulation(root_node=node, num_simulations=num_simulations, player=player)
-            action, next_node, _ = mcts.select_move(node=root_node, mode="exploit", temperature=1)
+            action, next_node, _ = mcts.select_move(node=root_node, mode="explore", temperature=0.1)
             action_index = int(np.argmax(action))
             state = next_node.state.copy()
             absolute_state[action_index] = 1
@@ -82,7 +82,7 @@ def play_game_minimax_first(game, mcts, minimax_player, num_simulations=1600):
             node = Node(prior_prob=0, player=player, action_index=None)
             node.set_state(state.copy())
             root_node = mcts.run_simulation(root_node=node, num_simulations=num_simulations, player=player)
-            action, next_node, _ = mcts.select_move(node=root_node, mode="exploit", temperature=1)
+            action, next_node, _ = mcts.select_move(node=root_node, mode="explore", temperature=0.1)
             action_index = int(np.argmax(action))
             state = next_node.state.copy()
             absolute_state[action_index] = -1
