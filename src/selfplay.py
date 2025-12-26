@@ -39,7 +39,7 @@ num_games = cfg.SELFPLAY_GAMES
 
 
 training_dataset = TrainingDataset()
-for game_number in tqdm(range(num_games),total=num_games): # play 2500 games
+for game_number in tqdm(range(num_games),total=num_games): 
     node = root_node # start with an empty board
     dataset = []
     player = 1  # initialize player (game starts with player 1)
