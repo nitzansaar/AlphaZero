@@ -126,7 +126,7 @@ def play_game_bot_first(game, mcts, minimax_player, num_simulations=1600):
             visit_counts_list = [int(v) for v in visit_counts]
             top_moves = get_top_moves(visit_counts_list, top_k=5)
 
-            action, next_node, _ = mcts.select_move(node=root_node, mode="exploit", temperature=1)
+            action, next_node, _ = mcts.select_move(node=root_node, mode="explore", temperature=0.1)
             action_index = int(np.argmax(action))
 
             state = next_node.state.copy()
@@ -247,7 +247,7 @@ def play_game_minimax_first(game, mcts, minimax_player, num_simulations=1600):
             visit_counts_list = [int(v) for v in visit_counts]
             top_moves = get_top_moves(visit_counts_list, top_k=5)
 
-            action, next_node, _ = mcts.select_move(node=root_node, mode="exploit", temperature=1)
+            action, next_node, _ = mcts.select_move(node=root_node, mode="explore", temperature=0.1)
             action_index = int(np.argmax(action))
 
             state = next_node.state.copy()
@@ -344,15 +344,22 @@ def main():
         os.path.join(script_dir, "..", cfg.SAVE_MODEL_PATH),
     ]
 
-    model_path = _load_latest_compatible_model(possible_model_dirs)
-    if model_path is None or not os.path.exists(model_path):
-        print("ERROR: No compatible model file found!")
+    # Load model 26 specifically
+    model_path = None
+    for model_dir in possible_model_dirs:
+        candidate_path = os.path.join(model_dir, "26_best_model.pt")
+        if os.path.exists(candidate_path):
+            model_path = candidate_path
+            break
+    
+    if model_path is None:
+        print("ERROR: Model 26 (26_best_model.pt) not found!")
         print("Searched in:")
         for model_dir in possible_model_dirs:
             print(f"  - {os.path.abspath(model_dir)}")
         return
 
-    print(f"Loading model from: {model_path}")
+    print(f"Loading model 26 from: {model_path}")
     vpn = ValuePolicyNetwork(model_path)
     policy_value_network = vpn.get_vp
     mcts = MonteCarloTreeSearch(game, policy_value_network)
