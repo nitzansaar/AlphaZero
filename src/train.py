@@ -143,9 +143,8 @@ class Trainer:
         )
 
         # Mixed precision training for RTX 5090 (faster training, less memory)
-        scaler = GradScaler() if (use_mixed_precision and device == "cuda") else None
-        if scaler:
-            print("Mixed precision training enabled (FP16/FP32)")
+        scaler = GradScaler()
+        print("Mixed precision training enabled (FP16/FP32)")
 
         best_loss = 1000
         history = []
@@ -160,40 +159,23 @@ class Trainer:
                 p = p.to(device, non_blocking=True) # policy target
 
                 # Mixed precision forward pass & loss calculation
-                if scaler:
-                    with autocast():
-                        yv, yp = self.model(X)
-                        vloss = value_criterion(yv, v) # value loss
-                        # Policy loss: cross-entropy with soft targets (MCTS visit distribution)
-                        aloss = policy_criterion(yp, p) # policy loss
-                        # Weighted combination like AlphaGo Zero
-                        loss = cfg.VALUE_LOSS_WEIGHT * vloss + cfg.POLICY_LOSS_WEIGHT * aloss
-
-                    train_loss += loss.item() # accumulate the loss
-                    train_vloss += vloss.item()
-                    train_aloss += aloss.item()
-
-                    # Mixed precision backpropagation
-                    optimizer.zero_grad()
-                    scaler.scale(loss).backward()
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
-                    # Standard precision training
+                with autocast():
                     yv, yp = self.model(X)
                     vloss = value_criterion(yv, v) # value loss
                     # Policy loss: cross-entropy with soft targets (MCTS visit distribution)
                     aloss = policy_criterion(yp, p) # policy loss
                     # Weighted combination like AlphaGo Zero
                     loss = cfg.VALUE_LOSS_WEIGHT * vloss + cfg.POLICY_LOSS_WEIGHT * aloss
-                    train_loss += loss.item() # accumulate the loss
-                    train_vloss += vloss.item()
-                    train_aloss += aloss.item()
 
-                    # backpropagation
-                    optimizer.zero_grad()
-                    loss.backward()
-                    optimizer.step()
+                train_loss += loss.item() # accumulate the loss
+                train_vloss += vloss.item()
+                train_aloss += aloss.item()
+
+                # Mixed precision backpropagation
+                optimizer.zero_grad()
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
 
             train_loss = train_loss / len(train_dataloader)
             train_vloss = train_vloss / len(train_dataloader)
