@@ -4,7 +4,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 from torch.cuda.amp import autocast, GradScaler
 from model import NeuralNetwork
-from dataset import TrainingDataset, TicTacToeDataset
+from dataset import TrainingDataset, GoDataset
 from config import Config as cfg
 from glob import glob
 import pandas as pd
@@ -90,7 +90,7 @@ class Trainer:
         save_path = os.path.join(cfg.SAVE_PICKLES, cfg.DATASET_PATH)
         ds.load(save_path)
         # return all data as training data with augmentation enabled
-        all_data = TicTacToeDataset(ds.training_dataset, use_augmentation=True)
+        all_data = GoDataset(ds.training_dataset, use_augmentation=True)
         # empty_eval = TicTacToeDataset([])
         return all_data
 

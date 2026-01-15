@@ -1,9 +1,9 @@
 """
-Data augmentation utilities for tic-tac-toe.
+Data augmentation utilities for 5x5 Go.
 Implements rotations and reflections to exploit board symmetry.
 """
 import numpy as np
-from config import Config as cfg
+from game import BOARD_SIZE, NUM_POSITIONS, PASS_ACTION, ACTION_SIZE
 
 def rotate_90(board_2d):
     """Rotate board 90 degrees clockwise."""
@@ -36,51 +36,49 @@ def reflect_anti_diagonal(board_2d):
 def transform_action(action_index, transform_type):
     """
     Transform action index according to transformation.
-    
+
     Args:
-        action_index: Original action index (0-80)
+        action_index: Original action index (0-24 for board, 25 for pass)
         transform_type: Type of transformation ('rotate_90', 'rotate_180', etc.)
-    
+
     Returns:
         Transformed action index
     """
-    row = action_index // 9
-    col = action_index % 9
-    
+    # Pass action doesn't transform
+    if action_index == PASS_ACTION:
+        return PASS_ACTION
+
+    row = action_index // BOARD_SIZE
+    col = action_index % BOARD_SIZE
+    max_idx = BOARD_SIZE - 1  # 4 for 5x5 board
+
     if transform_type == 'rotate_90':
-        # (row, col) -> (col, 8-row)
-        new_row, new_col = col, 8 - row
+        new_row, new_col = col, max_idx - row
     elif transform_type == 'rotate_180':
-        # (row, col) -> (8-row, 8-col)
-        new_row, new_col = 8 - row, 8 - col
+        new_row, new_col = max_idx - row, max_idx - col
     elif transform_type == 'rotate_270':
-        # (row, col) -> (8-col, row)
-        new_row, new_col = 8 - col, row
+        new_row, new_col = max_idx - col, row
     elif transform_type == 'reflect_horizontal':
-        # (row, col) -> (row, 8-col)
-        new_row, new_col = row, 8 - col
+        new_row, new_col = row, max_idx - col
     elif transform_type == 'reflect_vertical':
-        # (row, col) -> (8-row, col)
-        new_row, new_col = 8 - row, col
+        new_row, new_col = max_idx - row, col
     elif transform_type == 'reflect_diagonal':
-        # (row, col) -> (col, row)
         new_row, new_col = col, row
     elif transform_type == 'reflect_anti_diagonal':
-        # (row, col) -> (8-col, 8-row)
-        new_row, new_col = 8 - col, 8 - row
+        new_row, new_col = max_idx - col, max_idx - row
     else:
         return action_index
-    
-    return new_row * 9 + new_col
+
+    return new_row * BOARD_SIZE + new_col
 
 def transform_policy(policy, transform_type):
     """
     Transform policy distribution according to transformation.
-    
+
     Args:
-        policy: Original policy distribution (81 values)
+        policy: Original policy distribution (26 values: 25 positions + pass)
         transform_type: Type of transformation
-    
+
     Returns:
         Transformed policy distribution
     """
@@ -94,18 +92,21 @@ def transform_policy(policy, transform_type):
 def augment_data(state_flat, policy, transform_type):
     """
     Augment a single data point with a transformation.
-    
+
     Args:
-        state_flat: Flat board state (81 values)
-        policy: Policy distribution (81 values)
+        state_flat: Flat board state (25 values for board, or 27 with ko/passes)
+        policy: Policy distribution (26 values: 25 positions + pass)
         transform_type: Type of transformation
-    
+
     Returns:
         (augmented_state, augmented_policy)
     """
+    # Extract just the board portion (first 25 values)
+    board_only = state_flat[:NUM_POSITIONS]
+
     # Reshape to 2D
-    board_2d = state_flat.reshape(9, 9)
-    
+    board_2d = board_only.reshape(BOARD_SIZE, BOARD_SIZE)
+
     # Apply transformation to board
     if transform_type == 'rotate_90':
         board_2d = rotate_90(board_2d)
@@ -121,13 +122,14 @@ def augment_data(state_flat, policy, transform_type):
         board_2d = reflect_diagonal(board_2d)
     elif transform_type == 'reflect_anti_diagonal':
         board_2d = reflect_anti_diagonal(board_2d)
-    
-    # Flatten back
-    augmented_state = board_2d.flatten()
-    
-    # Transform policy
+
+    # Reconstruct state with transformed board
+    augmented_state = state_flat.copy()
+    augmented_state[:NUM_POSITIONS] = board_2d.flatten()
+
+    # Transform policy (handles pass action automatically)
     augmented_policy = transform_policy(policy, transform_type)
-    
+
     return augmented_state, augmented_policy
 
 def get_augmentations():
@@ -141,4 +143,3 @@ def get_augmentations():
         'reflect_diagonal',
         'reflect_anti_diagonal'
     ]
-
