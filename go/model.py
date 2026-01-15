@@ -9,31 +9,31 @@ class NeuralNetwork(nn.Module):
     def __init__(self):
         super(NeuralNetwork, self).__init__()
         # Convolutional layers for spatial feature extraction
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=4, padding=1)
-        self.conv2 = nn.Conv2d(64, 128, kernel_size=4, padding=1)
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
 
         # Shared fully connected layer
-        # Input size: 128 channels * 7 * 7 = 6272 (9x9 -> 8x8 -> 7x7 with kernel_size=4, padding=1)
-        self.fc_shared = nn.Linear(128 * 7 * 7, 256)
-        
+        # Input size: 128 channels * 5 * 5 = 3200 (5x5 board with kernel_size=3, padding=1 preserves size)
+        self.fc_shared = nn.Linear(128 * 5 * 5, 256)
+
         # Value head
         self.fc_value1 = nn.Linear(256, 64)
         self.fc_value2 = nn.Linear(64, 1)
-        
+
         # Policy head
         self.fc_policy = nn.Linear(256, cfg.ACTION_SIZE)
-        
+
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(0.2)
 
     def forward(self, x):
-        # x shape: (batch, 3, 9, 9) - 3 planes: current player, opponent, empty
+        # x shape: (batch, 3, 5, 5) - 3 planes: current player, opponent, empty
         # Conv layers
-        x = self.relu(self.conv1(x))  # (batch, 64, 8, 8)
-        x = self.relu(self.conv2(x))  # (batch, 128, 7, 7)
+        x = self.relu(self.conv1(x))  # (batch, 64, 5, 5)
+        x = self.relu(self.conv2(x))  # (batch, 128, 5, 5)
 
         # Flatten for fully connected
-        x = x.view(-1, 128 * 7 * 7)  # (batch, 6272)
+        x = x.view(-1, 128 * 5 * 5)  # (batch, 3200)
         x = self.dropout(self.relu(self.fc_shared(x)))  # (batch, 256)
 
         # Value head
@@ -41,6 +41,6 @@ class NeuralNetwork(nn.Module):
         value = torch.tanh(self.fc_value2(value))  # (batch, 1) in [-1, 1]
 
         # Policy head
-        policy = self.fc_policy(x)  # (batch, 81)
+        policy = self.fc_policy(x)  # (batch, 26)
 
         return value, policy
