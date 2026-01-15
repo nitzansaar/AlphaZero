@@ -20,8 +20,8 @@ def board_to_canonical_3d(board_flat, player):
         - Plane 1: Opponent positions
         - Plane 2: Empty positions
     """
-    board_2d = np.array(board_flat[:NUM_POSITIONS]).reshape(BOARD_SIZE, BOARD_SIZE)
-    canonical = board_2d * player
+    board_2d = np.array(board_flat[:NUM_POSITIONS]).reshape(BOARD_SIZE, BOARD_SIZE) # reshape the board to 5x5
+    canonical = board_2d * player # transform the board to the current player's perspective
 
     planes = np.zeros((3, BOARD_SIZE, BOARD_SIZE), dtype=np.float32)
     planes[0] = (canonical == 1).astype(np.float32)   # current player
