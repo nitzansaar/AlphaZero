@@ -30,24 +30,43 @@ def format_board_state(state):
 
 
 def display_board(state, game):
-    """Display the board in a user-friendly format with row/column numbers."""
+    """Display the board in traditional Go intersection style."""
     board_2d = format_board_state(state)
 
-    print("\n    ", end="")
+    # Map cell values to intersection symbols
+    symbols = {'.': '+', 'X': '●', 'O': '○'}
+
+    # Column headers
+    print("\n     ", end="")
     for col in range(BOARD_SIZE):
-        print(f"  {col} ", end="")
-    print("\n   +" + "---+" * BOARD_SIZE)
+        print(f"{col}   ", end="")
+    print("\n")
 
     for row_idx, row in enumerate(board_2d):
-        print(f" {row_idx} |", end="")
-        for cell in row:
-            print(f" {cell} |", end="")
-        print(f" {row_idx}")
-        print("   +" + "---+" * BOARD_SIZE)
+        # Print the row with intersections connected by horizontal lines
+        print(f" {row_idx}   ", end="")
+        for col_idx, cell in enumerate(row):
+            symbol = symbols[cell]
+            if col_idx < BOARD_SIZE - 1:
+                print(f"{symbol}───", end="")
+            else:
+                print(f"{symbol}", end="")
+        print(f"   {row_idx}")
 
-    print("    ", end="")
+        # Print vertical connectors (except after last row)
+        if row_idx < BOARD_SIZE - 1:
+            print("     ", end="")
+            for col_idx in range(BOARD_SIZE):
+                if col_idx < BOARD_SIZE - 1:
+                    print("│   ", end="")
+                else:
+                    print("│", end="")
+            print()
+
+    # Column headers at bottom
+    print("\n     ", end="")
     for col in range(BOARD_SIZE):
-        print(f"  {col} ", end="")
+        print(f"{col}   ", end="")
 
     # Show game info
     ko = game.get_ko_point(state)
@@ -278,30 +297,9 @@ def main():
         else:
             print("Invalid choice. Please enter 'y' or 'n'")
 
-    print("\nChoose difficulty:")
-    print("  1. Easy (200 simulations)")
-    print("  2. Medium (400 simulations)")
-    print("  3. Hard (800 simulations)")
-    print("  4. Expert (1600 simulations)")
-
-    while True:
-        choice = input("\nEnter difficulty (1-4): ").strip()
-        if choice == '1':
-            num_simulations = 200
-            break
-        elif choice == '2':
-            num_simulations = 400
-            break
-        elif choice == '3':
-            num_simulations = 800
-            break
-        elif choice == '4':
-            num_simulations = 1600
-            break
-        else:
-            print("Invalid choice. Please enter 1, 2, 3, or 4")
-
-    print(f"\nDifficulty set: {num_simulations} MCTS simulations per move")
+    # Always use a fixed MCTS budget per move (no difficulty prompt).
+    num_simulations = 800
+    print(f"\nBot settings: {num_simulations} MCTS simulations per move")
 
     while True:
         result = play_game(game, mcts, human_player, num_simulations)
