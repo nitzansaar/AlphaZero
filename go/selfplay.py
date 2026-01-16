@@ -13,7 +13,7 @@ save_path = os.path.join(cfg.SAVE_PICKLES, cfg.DATASET_PATH)
 
 game = Go()
 
-# Load the latest trained model if available
+# Load the latest trained model if available, or use random initialization
 all_models = glob(os.path.join(cfg.SAVE_MODEL_PATH, "*.pt"))
 if all_models:
     files = [int(os.path.basename(f).split("_")[0]) for f in all_models if os.path.basename(f).split("_")[0].isdigit()]
@@ -24,10 +24,10 @@ if all_models:
         vpn = ValuePolicyNetwork(path=model_path)
     else:
         print("No trained models found. Using randomly initialized network.")
-        exit()
+        vpn = ValuePolicyNetwork(path=None)
 else:
     print("No trained models found. Using randomly initialized network.")
-    exit()
+    vpn = ValuePolicyNetwork(path=None)
 
 policy_value_network = vpn.get_vp
 mcts = MonteCarloTreeSearch(game, policy_value_network)

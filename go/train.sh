@@ -14,6 +14,16 @@ export CUDNN_BENCHMARK=1
 # Change to src directory for relative imports
 cd "$(dirname "$0")" || exit
 
+# Activate virtual environment
+SCRIPT_DIR="$(dirname "$0")"
+VENV_PATH="$SCRIPT_DIR/../venv/bin/activate"
+if [ -f "$VENV_PATH" ]; then
+    source "$VENV_PATH"
+else
+    echo "Warning: Virtual environment not found at $VENV_PATH"
+    echo "Make sure required packages (numpy, torch, etc.) are installed"
+fi
+
 # Number of iterations to run (default: 10, recommended for strong play)
 NUM_ITERATIONS=${1:-10}
 
@@ -26,7 +36,7 @@ if ! [[ "$NUM_ITERATIONS" =~ ^[0-9]+$ ]] || [ "$NUM_ITERATIONS" -lt 1 ]; then
 fi
 
 echo "============================================"
-echo "AlphaGo Zero Training Pipeline"
+echo "5x5 Go - AlphaZero Training Pipeline"
 echo "============================================"
 echo "Iterations to run: $NUM_ITERATIONS"
 echo "============================================"
@@ -35,11 +45,11 @@ echo ""
 START_TIME=$(date +%s)
 START_TIME_ISO=$(date -d "@$START_TIME" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date '+%Y-%m-%d %H:%M:%S')
 
-# Create timing log file
-TIMING_LOG="output_tictac/logs/timing_tracking.csv"
-mkdir -p output_tictac/logs
+# Create timing log file (use same logs directory as Python scripts)
+TIMING_LOG="logs/timing_tracking.csv"
+mkdir -p logs
 if [ ! -f "$TIMING_LOG" ]; then
-    echo "iteration,start_time,end_time,duration_seconds,selfplay_seconds,training_seconds,eval_seconds" > "$TIMING_LOG"
+    echo "iteration,start_time,end_time,duration_seconds,selfplay_seconds,training_seconds" > "$TIMING_LOG"
 fi
 
 # Run iterations
@@ -55,7 +65,7 @@ for iteration in $(seq 1 $NUM_ITERATIONS); do
     echo ""
     
     # Self-play phase
-    echo "Phase 1/3: Generating self-play games..."
+    echo "Phase 1/2: Generating self-play games..."
     SELFPLAY_START=$(date +%s)
     python3 selfplay.py
     
@@ -70,7 +80,7 @@ for iteration in $(seq 1 $NUM_ITERATIONS); do
     echo "Self-play complete. Starting training..."
     
     # Training phase
-    echo "Phase 2/3: Training neural network..."
+    echo "Phase 2/2: Training neural network..."
     TRAINING_START=$(date +%s)
     python3 train.py
     
@@ -80,23 +90,7 @@ for iteration in $(seq 1 $NUM_ITERATIONS); do
     fi
     TRAINING_END=$(date +%s)
     TRAINING_DURATION=$((TRAINING_END - TRAINING_START))
-    
-    # Evaluation phase (compare with previous model)
-    echo ""
-    echo "Phase 3/3: Evaluating model (ELO calculation)..."
-    EVAL_START=$(date +%s)
-    # Get the actual iteration number from the file saved by train.py
-    iter_file="output_tictac/logs/current_iteration.txt"
-    if [ -f "$iter_file" ]; then
-        actual_iter=$(cat "$iter_file")
-        python3 evaluate_model.py $actual_iter 2>/dev/null || echo "Evaluation skipped (no previous model to compare)"
-    else
-        # Fallback: try to detect from latest model
-        python3 evaluate_model.py 2>/dev/null || echo "Evaluation skipped (no previous model to compare)"
-    fi
-    EVAL_END=$(date +%s)
-    EVAL_DURATION=$((EVAL_END - EVAL_START))
-    
+
     ITER_END=$(date +%s)
     ITER_DURATION=$((ITER_END - ITER_START))
     ITER_MIN=$((ITER_DURATION / 60))
@@ -110,11 +104,11 @@ for iteration in $(seq 1 $NUM_ITERATIONS); do
     
     # Save timing data
     ITER_END_ISO=$(date -d "@$ITER_END" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date '+%Y-%m-%d %H:%M:%S')
-    echo "$actual_iter_num,$ITER_START_ISO,$ITER_END_ISO,$ITER_DURATION,$SELFPLAY_DURATION,$TRAINING_DURATION,$EVAL_DURATION" >> "$TIMING_LOG"
+    echo "$actual_iter_num,$ITER_START_ISO,$ITER_END_ISO,$ITER_DURATION,$SELFPLAY_DURATION,$TRAINING_DURATION" >> "$TIMING_LOG"
     
     echo ""
     echo "Iteration $iteration complete in ${ITER_MIN}m ${ITER_SEC}s"
-    echo "  Breakdown: Self-play: $((SELFPLAY_DURATION / 60))m $((SELFPLAY_DURATION % 60))s | Training: $((TRAINING_DURATION / 60))m $((TRAINING_DURATION % 60))s | Eval: $((EVAL_DURATION / 60))m $((EVAL_DURATION % 60))s"
+    echo "  Breakdown: Self-play: $((SELFPLAY_DURATION / 60))m $((SELFPLAY_DURATION % 60))s | Training: $((TRAINING_DURATION / 60))m $((TRAINING_DURATION % 60))s"
     
     # Show progress
     if [ $iteration -lt $NUM_ITERATIONS ]; then
@@ -139,7 +133,7 @@ AVG_ITER_MIN=$((TOTAL_DURATION / NUM_ITERATIONS / 60))
 AVG_ITER_SEC=$(((TOTAL_DURATION / NUM_ITERATIONS) % 60))
 
 # Save overall timing summary
-TIMING_SUMMARY="output_tictac/logs/training_summary.txt"
+TIMING_SUMMARY="logs/training_summary.txt"
 cat > "$TIMING_SUMMARY" << EOF
 ============================================
 TRAINING SESSION SUMMARY
