@@ -75,12 +75,23 @@ class MonteCarloTreeSearch:
             node.total_action_value_of_next_state_W = node.total_action_value_of_next_state_W + value
             node.mean_action_value_of_next_state_Q = node.total_action_value_of_next_state_W / node.total_visits_N
 
-    def run_simulation(self, root_node, num_simulations=1600, player=1):
+    def run_simulation(self, root_node, num_simulations=1600, player=1, add_noise=True):
         root_state = root_node.state
         next_player = -1 * player
         value, action_probs = self.policy_value_network(root_state, player)
         valid_moves = self.game.get_valid_moves(root_state, player)
         action_probs = action_probs * valid_moves
+
+        # Add Dirichlet noise at root for exploration (AlphaGo Zero style)
+        if add_noise:
+            noise = np.random.dirichlet([0.03] * len(action_probs))
+            action_probs = 0.75 * action_probs + 0.25 * noise
+            # Re-mask invalid moves after adding noise
+            action_probs = action_probs * valid_moves
+            # Renormalize
+            if np.sum(action_probs) > 0:
+                action_probs = action_probs / np.sum(action_probs)
+
         root_node.expand(action_probs=action_probs, player=next_player, parent=root_node)
 
         for _ in range(num_simulations):
