@@ -1,7 +1,7 @@
 class Config:
     BATCH_SIZE = 512 
 
-    EPOCHS = 200 
+    EPOCHS = 75 
     SELFPLAY_GAMES = 800
     
     SAVE_MODEL_PATH = "models"
