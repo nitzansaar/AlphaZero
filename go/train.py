@@ -144,7 +144,6 @@ class Trainer:
 
         # Mixed precision training for RTX 5090 (faster training, less memory)
         scaler = GradScaler()
-        print("Mixed precision training enabled (FP16/FP32)")
 
         best_loss = 1000
         history = []
@@ -154,7 +153,7 @@ class Trainer:
             train_vloss = 0
             train_aloss = 0
             for i, (X, v, p) in enumerate(train_dataloader): # iterate through the batch
-                X = X.to(device, non_blocking=True) # board state (non_blocking for async transfer)
+                X = X.to(device, non_blocking=True) # board state
                 v = v.to(device, non_blocking=True) # value target
                 p = p.to(device, non_blocking=True) # policy target
 
