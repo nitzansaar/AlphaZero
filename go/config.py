@@ -24,7 +24,7 @@ class Config:
     MOMENTUM = 0.9  # For SGD optimizer (if used)
     
     # Temperature decay for self-play
-    TEMP_THRESHOLD = 30  # Number of moves before switching to deterministic play
+    TEMP_THRESHOLD = 10  # Number of moves before switching to deterministic play
     INITIAL_TEMP = 1.0  # Initial temperature for exploration
     
     # Data augmentation
