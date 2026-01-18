@@ -18,8 +18,8 @@ all_models = glob(os.path.join(cfg.SAVE_MODEL_PATH, "*.pt"))
 if all_models:
     files = [int(os.path.basename(f).split("_")[0]) for f in all_models if os.path.basename(f).split("_")[0].isdigit()]
     if files:
-        latest_num = max(files)
-        model_path = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(latest_num))
+        latest_num = max(files) # get the latest file number
+        model_path = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(latest_num)) # get the path to the latest trained model
         print(f"Loading trained model: {model_path}")
         vpn = ValuePolicyNetwork(path=model_path)
     else:
