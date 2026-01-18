@@ -5,7 +5,7 @@ class Config:
     SELFPLAY_GAMES = 800
     
     SAVE_MODEL_PATH = "models"
-    DATASET_QUEUE_SIZE = 50000
+    DATASET_QUEUE_SIZE = 30000
     SAVE_PICKLES = "pickles"
     DATASET_PATH = "training_dataset.pkl"
     BEST_MODEL = "{}_best_model.pt"
