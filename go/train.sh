@@ -105,7 +105,7 @@ for iteration in $(seq 1 $NUM_ITERATIONS); do
     # Save timing data
     ITER_END_ISO=$(date -d "@$ITER_END" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date '+%Y-%m-%d %H:%M:%S')
     echo "$actual_iter_num,$ITER_START_ISO,$ITER_END_ISO,$ITER_DURATION,$SELFPLAY_DURATION,$TRAINING_DURATION" >> "$TIMING_LOG"
-    
+
     echo ""
     echo "Iteration $iteration complete in ${ITER_MIN}m ${ITER_SEC}s"
     echo "  Breakdown: Self-play: $((SELFPLAY_DURATION / 60))m $((SELFPLAY_DURATION % 60))s | Training: $((TRAINING_DURATION / 60))m $((TRAINING_DURATION % 60))s"

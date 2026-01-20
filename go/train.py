@@ -2,7 +2,7 @@ import os
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from model import NeuralNetwork
 from dataset import TrainingDataset, GoDataset
 from config import Config as cfg
@@ -143,7 +143,7 @@ class Trainer:
         )
 
         # Mixed precision training for RTX 5090 (faster training, less memory)
-        scaler = GradScaler()
+        scaler = GradScaler('cuda')
 
         best_loss = 1000
         history = []
@@ -158,9 +158,9 @@ class Trainer:
                 p = p.to(device, non_blocking=True) # policy target
 
                 # Mixed precision forward pass & loss calculation
-                with autocast():
+                with autocast('cuda'):
                     yv, yp = self.model(X)
-                    vloss = value_criterion(yv, v) # value loss
+                    vloss = value_criterion(yv.squeeze(-1), v) # value loss
                     # Policy loss: cross-entropy with soft targets (MCTS visit distribution)
                     aloss = policy_criterion(yp, p) # policy loss
                     # Weighted combination like AlphaGo Zero
