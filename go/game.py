@@ -101,16 +101,16 @@ class Go:
         Find all stones connected to the stone at idx.
         Returns (group_indices, liberty_count).
         """
-        if board[idx] == 0:
+        if board[idx] == 0: # if the position is empty, return an empty group and 0 liberties
             return set(), 0
 
         color = board[idx]
         group = set()
         liberties = set()
-        frontier = [idx]
+        queue = [idx]
 
-        while frontier:
-            current = frontier.pop()
+        while queue:
+            current = queue.pop()
             if current in group:
                 continue
             group.add(current)
@@ -119,7 +119,7 @@ class Go:
                 if board[neighbor] == 0:
                     liberties.add(neighbor)
                 elif board[neighbor] == color and neighbor not in group:
-                    frontier.append(neighbor)
+                    queue.append(neighbor)
 
         return group, len(liberties)
 
@@ -330,13 +330,26 @@ class Go:
         """Check if the game has ended (two consecutive passes)."""
         return self.get_consecutive_passes(state) >= 2
 
-    def get_winner(self, state):
+    def get_winner(self, state, perspective=1):
         """
         Determine the winner of the game.
         Returns 1 (black wins), -1 (white wins), or 0 (draw).
         Uses area scoring with 2.5 komi for white (standard for 5x5).
+
+        Args:
+            state: Game state (may be in canonical form)
+            perspective: Whose perspective the state is from (1=Black, -1=White).
+                        In canonical form, current player's stones are 1.
+                        If perspective=-1, the board is flipped to absolute form before scoring.
         """
-        board = self.get_board(state)
+        board = self.get_board(state).copy()
+
+        # Convert from canonical to absolute form if needed
+        # In canonical form: 1 = current player, -1 = opponent
+        # In absolute form: 1 = Black, -1 = White
+        if perspective == -1:
+            board = board * -1
+
         black_score, white_score = self.count_territory(board)
 
         # Apply komi (compensation for white going second)
@@ -351,31 +364,48 @@ class Go:
         else:
             return 0
 
-    def win_or_draw(self, state):
+    def win_or_draw(self, state, perspective=1):
         """
         Check game state and return result.
         Returns 1 (black wins), -1 (white wins), 0 (draw), or None (game ongoing).
+
+        Args:
+            state: Game state (may be in canonical form)
+            perspective: Whose perspective the state is from (1=Black, -1=White)
         """
         if self.game_ended(state):
-            return self.get_winner(state)
+            return self.get_winner(state, perspective)
         return None
 
     def get_reward_for_next_player(self, state, player):
-        """Get reward from next player's perspective."""
-        result = self.win_or_draw(state)
-        if result is None:
-            return None
-        if result == 0:
-            return 0
-        return -1 * player * result
+        """
+        Get the game result for use in MCTS backup.
 
-    def play(self, board_state, player, action_index):
+        Args:
+            state: Game state in canonical form
+            player: Whose perspective the state is from (1=Black, -1=White)
+
+        Returns:
+            1 (Black wins), -1 (White wins), 0 (draw), or None (game ongoing)
+        """
+        result = self.win_or_draw(state, perspective=player)
+        return result
+
+    def play(self, board_state, player, action_index, perspective=1):
         """
         Execute a move and return (new_state, result, next_player).
+
+        Args:
+            board_state: Current game state
+            player: Player making the move (1 or -1)
+            action_index: Action to take
+            perspective: Whose perspective the state is from (default 1 for absolute form)
         """
         new_state = self.apply_move(board_state, action_index, player)
-        result = self.win_or_draw(new_state)
+        # After the move, perspective shifts to the next player
         next_player = -player
+        next_perspective = -perspective if perspective != 1 else 1
+        result = self.win_or_draw(new_state, perspective=next_perspective)
         return new_state, result, next_player
 
     def render(self, state):

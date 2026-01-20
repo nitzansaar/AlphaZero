@@ -115,7 +115,7 @@ def get_human_move(game, state, player):
             return None
 
 
-def get_bot_move(game, mcts, state, player, num_simulations=800):
+def get_bot_move(game, mcts, state, player, num_simulations=200):
     """Get the bot's move using MCTS."""
     print(f"\nBot is thinking... ({num_simulations} MCTS simulations)")
 
@@ -150,7 +150,7 @@ def get_bot_move(game, mcts, state, player, num_simulations=800):
     return action_index
 
 
-def play_game(game, mcts, human_player, num_simulations=800):
+def play_game(game, mcts, human_player, num_simulations=200):
     """Play a single game of human vs bot."""
     state = game.state.copy()
     current_player = 1  # Black always goes first
@@ -298,7 +298,7 @@ def main():
             print("Invalid choice. Please enter 'y' or 'n'")
 
     # Always use a fixed MCTS budget per move (no difficulty prompt).
-    num_simulations = 800
+    num_simulations = 200
     print(f"\nBot settings: {num_simulations} MCTS simulations per move")
 
     while True:

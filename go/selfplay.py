@@ -8,6 +8,9 @@ from value_policy_function import ValuePolicyNetwork
 from copy import copy
 from glob import glob
 
+# Maximum moves per game - force end if exceeded (5x5 board shouldn't need more than this)
+MAX_MOVES_PER_GAME = 100
+
 os.makedirs(cfg.SAVE_PICKLES, exist_ok=True)
 save_path = os.path.join(cfg.SAVE_PICKLES, cfg.DATASET_PATH)
 
@@ -35,13 +38,21 @@ root_node = mcts.init_root_node()
 num_games = cfg.SELFPLAY_GAMES
 
 training_dataset = TrainingDataset()
+force_ended_games = 0
+
 for game_number in tqdm(range(num_games), total=num_games):
     node = root_node  # start with an empty board
     dataset = []
     player = 1  # initialize player (game starts with player 1 / black)
     move_count = 0
+    force_ended = False
 
-    while game.win_or_draw(node.state) is None:
+    while game.win_or_draw(node.state, perspective=player) is None:
+        # Check if we've exceeded max moves
+        if move_count >= MAX_MOVES_PER_GAME:
+            force_ended = True
+            break
+
         parent_state = copy(node.state)
         node = mcts.run_simulation(root_node=node, num_simulations=cfg.NUM_SIMULATIONS, player=player)
 
@@ -56,8 +67,11 @@ for game_number in tqdm(range(num_games), total=num_games):
         player = -1 * player  # switch player
         move_count += 1
 
-    # Get the actual winner from the final game state
-    winner = game.win_or_draw(node.state)
+    # Skip force-ended games, only save completed games
+    if force_ended:
+        continue
+
+    winner = game.win_or_draw(node.state, perspective=player)
     training_dataset.add_game_to_training_dataset(dataset, winner)
 
     if game_number % 500 == 0:
