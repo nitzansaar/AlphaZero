@@ -38,6 +38,12 @@ root_node = mcts.init_root_node()
 num_games = cfg.SELFPLAY_GAMES
 
 training_dataset = TrainingDataset()
+# Load existing dataset to accumulate data across iterations (replay buffer)
+if os.path.exists(save_path):
+    training_dataset.load(save_path)
+    print(f"Loaded existing dataset with {len(training_dataset.training_dataset)} samples")
+else:
+    print("Starting with empty dataset")
 force_ended_games = 0
 
 for game_number in tqdm(range(num_games), total=num_games):
@@ -67,11 +73,14 @@ for game_number in tqdm(range(num_games), total=num_games):
         player = -1 * player  # switch player
         move_count += 1
 
-    # Skip force-ended games, only save completed games
+    # For force-ended games, compute winner based on current territory
     if force_ended:
-        continue
+        force_ended_games += 1
+        # Compute winner by territory (as if both players passed)
+        winner = game.get_winner(node.state, perspective=player)
+    else:
+        winner = game.win_or_draw(node.state, perspective=player)
 
-    winner = game.win_or_draw(node.state, perspective=player)
     training_dataset.add_game_to_training_dataset(dataset, winner)
 
     if game_number % 500 == 0:
@@ -79,3 +88,5 @@ for game_number in tqdm(range(num_games), total=num_games):
         print("saving....", game_number)
 
 training_dataset.save(save_path)
+print(f"\nCompleted games: {num_games - force_ended_games}, Force-ended games: {force_ended_games}")
+print(f"Total training samples: {len(training_dataset.training_dataset)}")

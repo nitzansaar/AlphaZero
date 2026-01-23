@@ -1,11 +1,11 @@
 class Config:
-    BATCH_SIZE = 512 
+    BATCH_SIZE = 512
 
-    EPOCHS = 75 
-    SELFPLAY_GAMES = 200
+    EPOCHS = 200
+    SELFPLAY_GAMES = 1000
 
     SAVE_MODEL_PATH = "models"
-    DATASET_QUEUE_SIZE = 30000
+    DATASET_QUEUE_SIZE = 100000
     SAVE_PICKLES = "pickles"
     DATASET_PATH = "training_dataset.pkl"
     BEST_MODEL = "{}_best_model.pt"
@@ -13,7 +13,7 @@ class Config:
     EVAL_GAMES = 40
     ACTION_SIZE = 26 # number of possible actions (5x5 board) - 25 positions + 1 for pass
     NUM_GAMES = 100
-    NUM_SIMULATIONS = 200
+    NUM_SIMULATIONS = 600
     
     # AlphaGo Zero specific parameters
     MCTS_UCB_C = 1.414  # sqrt(2) - exploration constant for UCB formula
