@@ -26,7 +26,7 @@ _model_cache = {
 
 def load_model():
     """
-    Load the latest trained model.
+    Load the best trained model (highest iteration number).
     Returns the model path or None if no model found.
     """
     # Look for models relative to this script's location
@@ -36,21 +36,23 @@ def load_model():
     model_path = None
 
     if all_models:
-        # Get modification time for each model
-        models_with_time = []
+        # Extract iteration numbers and sort by highest first
+        files_with_numbers = []
         for f in all_models:
-            try:
-                mtime = os.path.getmtime(f)
-                models_with_time.append((mtime, f))
-            except OSError:
-                continue
+            basename = os.path.basename(f)
+            if "_best_model.pt" in basename:
+                try:
+                    num = int(basename.split("_")[0])
+                    files_with_numbers.append((num, f))
+                except ValueError:
+                    continue
 
-        if models_with_time:
-            # Sort by modification time (most recent first)
-            models_with_time.sort(reverse=True)
+        if files_with_numbers:
+            # Sort by iteration number (highest first)
+            files_with_numbers.sort(reverse=True)
 
-            # Try loading models starting from most recent until one works
-            for mtime, model_file in models_with_time:
+            # Try loading models starting from highest iteration until one works
+            for num, model_file in files_with_numbers:
                 try:
                     # Quick test: try to load state dict to check architecture
                     test_model = NeuralNetwork().to(device)
@@ -58,31 +60,19 @@ def load_model():
                     test_model.load_state_dict(test_state)
                     # If we get here, architecture matches!
                     model_path = model_file
+                    print(f"Loaded model: {os.path.basename(model_file)} (iteration {num})")
                     break
                 except (RuntimeError, FileNotFoundError) as e:
                     # Architecture mismatch or file error, try next
+                    print(f"Skipping {os.path.basename(model_file)}: {e}")
                     continue
                 finally:
                     # Clean up test model
-                    del test_model
+                    if 'test_model' in locals():
+                        del test_model
                     if 'test_state' in locals():
                         del test_state
                     torch.cuda.empty_cache() if torch.cuda.is_available() else None
-
-            # If no compatible model found, fall back to highest number
-            if model_path is None:
-                files_with_numbers = []
-                for f in all_models:
-                    basename = os.path.basename(f)
-                    if "_best_model.pt" in basename:
-                        try:
-                            num = int(basename.split("_")[0])
-                            files_with_numbers.append((num, f))
-                        except ValueError:
-                            continue
-
-                if files_with_numbers:
-                    latest_num, model_path = max(files_with_numbers, key=lambda x: x[0])
 
     if model_path and os.path.exists(model_path):
         return model_path
