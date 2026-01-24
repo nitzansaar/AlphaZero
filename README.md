@@ -1,4 +1,4 @@
-# AlphaZero-style Connect Five Agent
+# AlphaGo Zero Agent
 
 A reinforcement learning agent that learns to play board games optimally without human knowledge via self-play, guided by a policy/value neural network and Monte Carlo Tree Search (MCTS).
 
