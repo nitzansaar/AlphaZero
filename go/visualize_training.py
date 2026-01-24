@@ -17,7 +17,6 @@ except ImportError as e:
     print("  sudo apt-get install python3-matplotlib python3-pandas python3-numpy")
     sys.exit(1)
 
-from track_progress import load_training_history
 from config import Config as cfg
 
 # Fix path resolution - ensure LOGDIR is relative to script location
@@ -29,6 +28,45 @@ if not os.path.isabs(cfg.LOGDIR):
 # Output directory for visualizations
 output_dir = os.path.join(_script_dir, "test_output")
 os.makedirs(output_dir, exist_ok=True)
+
+def load_training_history():
+    """Load training history from logs directory."""
+    import glob
+
+    # Find all history CSV files
+    pattern = os.path.join(cfg.LOGDIR, "*_history.csv")
+    history_files = glob.glob(pattern)
+
+    if not history_files:
+        print(f"No history files found in {cfg.LOGDIR}")
+        return None
+
+    all_history = []
+    for filepath in history_files:
+        # Extract iteration number from filename (e.g., "0_history.csv" -> 0)
+        filename = os.path.basename(filepath)
+        try:
+            iteration = int(filename.split('_')[0])
+        except ValueError:
+            print(f"Skipping file with invalid name format: {filename}")
+            continue
+
+        # Load the CSV
+        try:
+            df = pd.read_csv(filepath)
+            df['iteration'] = iteration
+            all_history.append(df)
+        except Exception as e:
+            print(f"Error loading {filename}: {e}")
+            continue
+
+    if not all_history:
+        return None
+
+    # Concatenate all history dataframes
+    combined = pd.concat(all_history, ignore_index=True)
+    return combined
+
 
 def create_combined_loss_graph():
     """Create a single graph showing combined loss across all training iterations."""
