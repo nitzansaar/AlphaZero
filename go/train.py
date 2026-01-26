@@ -170,9 +170,12 @@ class Trainer:
                 train_vloss += vloss.item()
                 train_aloss += aloss.item()
 
-                # Mixed precision backpropagation
+                # Mixed precision backpropagation with gradient clipping
                 optimizer.zero_grad()
                 scaler.scale(loss).backward()
+                # Gradient clipping to prevent exploding gradients (important for ResNets)
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 scaler.step(optimizer)
                 scaler.update()
 
