@@ -52,17 +52,19 @@ def parse_coords(text):
     return coords
 
 
-def display_board(board):
+def display_board(board, highlight=None):
+    """Display board, optionally highlighting a move with [*]"""
     print("\n     " + "   ".join([str(i) for i in range(BOARD_SIZE)]))
     for row in range(BOARD_SIZE):
         row_str = f" {row}   "
         for col in range(BOARD_SIZE):
+            is_highlight = (highlight == (row, col))
             if board[row, col] == 1:
-                sym = " ○ "  # Black
+                sym = "[○]" if is_highlight else " ○ "  # Black
             elif board[row, col] == -1:
-                sym = " ● "  # White
+                sym = "[●]" if is_highlight else " ● "  # White
             else:
-                sym = " + "
+                sym = "[*]" if is_highlight else " + "  # Empty / suggested move
             row_str += sym if col == BOARD_SIZE - 1 else sym.rstrip() + "──"
         print(row_str)
         if row < BOARD_SIZE - 1:
@@ -82,81 +84,100 @@ def main():
     game = Go()
     mcts = MonteCarloTreeSearch(game, vpn.get_vp)
 
-    board = np.zeros((BOARD_SIZE, BOARD_SIZE))
+    while True:
+        board = np.zeros((BOARD_SIZE, BOARD_SIZE))
 
-    # Show empty board with coordinates
-    print("Board coordinates:")
-    display_board(board)
+        # Show empty board with coordinates
+        print("Board coordinates:")
+        display_board(board)
 
-    print("Enter coordinates as: '1,1 2,2' or '1 1 2 2' or '11 22'")
-    print("Leave empty for no pieces.\n")
+        print("Enter coordinates as: '1,1 2,2' or '1 1 2 2' or '11 22'")
+        print("Leave empty for no pieces. Type 'q' to quit.\n")
 
-    black_input = input("Black pieces (○): ").strip()
-    for r, c in parse_coords(black_input):
-        if 0 <= r < BOARD_SIZE and 0 <= c < BOARD_SIZE:
-            board[r, c] = 1
+        black_input = input("Black pieces (○): ").strip()
+        if black_input.lower() == 'q':
+            break
+        for r, c in parse_coords(black_input):
+            if 0 <= r < BOARD_SIZE and 0 <= c < BOARD_SIZE:
+                board[r, c] = 1
 
-    display_board(board)
+        display_board(board)
 
-    white_input = input("White pieces (●): ").strip()
-    for r, c in parse_coords(white_input):
-        if 0 <= r < BOARD_SIZE and 0 <= c < BOARD_SIZE:
-            board[r, c] = -1
+        white_input = input("White pieces (●): ").strip()
+        if white_input.lower() == 'q':
+            break
+        for r, c in parse_coords(white_input):
+            if 0 <= r < BOARD_SIZE and 0 <= c < BOARD_SIZE:
+                board[r, c] = -1
 
-    print("\nFinal board:")
-    display_board(board)
+        print("\nFinal board:")
+        display_board(board)
 
-    # Current player
-    p = input("Whose turn? (b/w) [b]: ").strip().lower()
-    player = -1 if p == "w" else 1
-    player_name = "Black (○)" if player == 1 else "White (●)"
+        # Current player
+        p = input("Whose turn? (b/w) [b]: ").strip().lower()
+        if p == 'q':
+            break
+        player = -1 if p == "w" else 1
+        player_name = "Black (○)" if player == 1 else "White (●)"
 
-    # Create state
-    state = np.zeros(NUM_POSITIONS + 2)
-    state[:NUM_POSITIONS] = board.flatten()
-    state[NUM_POSITIONS] = -1
-    state[NUM_POSITIONS + 1] = 0
+        # Create state
+        state = np.zeros(NUM_POSITIONS + 2)
+        state[:NUM_POSITIONS] = board.flatten()
+        state[NUM_POSITIONS] = -1
+        state[NUM_POSITIONS + 1] = 0
 
-    # Policy-Value Network
-    value, policy = vpn.get_vp(state, player)
-    valid_moves = game.get_valid_moves(state, player)
-    policy = policy * valid_moves
-    if policy.sum() > 0:
-        policy = policy / policy.sum()
+        # Policy-Value Network
+        value, policy = vpn.get_vp(state, player)
+        valid_moves = game.get_valid_moves(state, player)
+        policy = policy * valid_moves
+        if policy.sum() > 0:
+            policy = policy / policy.sum()
 
-    print(f"\n{'='*50}")
-    print(f"Player to move: {player_name}")
-    print(f"Value: {value:.4f}")
-    print(f"{'='*50}")
+        print(f"\n{'='*50}")
+        print(f"Player to move: {player_name}")
+        print(f"Value: {value:.4f}")
+        print(f"{'='*50}")
 
-    print("\nPolicy (top 10):")
-    moves = [(i, policy[i]) for i in range(ACTION_SIZE) if policy[i] > 0]
-    moves.sort(key=lambda x: x[1], reverse=True)
-    for i, (idx, prob) in enumerate(moves[:10]):
-        if idx == PASS_ACTION:
-            print(f"  {i+1}. pass: {prob*100:.1f}%")
-        else:
-            print(f"  {i+1}. ({idx//BOARD_SIZE}, {idx%BOARD_SIZE}): {prob*100:.1f}%")
-
-    # MCTS
-    sims = input(f"\nMCTS simulations [{cfg.NUM_SIMULATIONS}, 0=skip]: ").strip()
-    num_sims = int(sims) if sims else cfg.NUM_SIMULATIONS
-
-    if num_sims > 0:
-        print(f"\nRunning {num_sims} simulations...")
-        root = Node(prior_prob=0, player=player, action_index=None)
-        root.set_state(state.copy())
-        root = mcts.run_simulation(root, num_sims, player, add_noise=False)
-
-        print("\nMCTS visits (top 10):")
-        visits = [(idx, child.total_visits_N, child.mean_action_value_of_next_state_Q)
-                  for idx, child in root.children.items()]
-        visits.sort(key=lambda x: x[1], reverse=True)
-        for i, (idx, v, q) in enumerate(visits[:10]):
+        print("\nPolicy (top 10):")
+        moves = [(i, policy[i]) for i in range(ACTION_SIZE) if policy[i] > 0]
+        moves.sort(key=lambda x: x[1], reverse=True)
+        for i, (idx, prob) in enumerate(moves[:10]):
             if idx == PASS_ACTION:
-                print(f"  {i+1}. pass: {v} visits, Q={q:.3f}")
+                print(f"  {i+1}. pass: {prob*100:.1f}%")
             else:
-                print(f"  {i+1}. ({idx//BOARD_SIZE}, {idx%BOARD_SIZE}): {v} visits, Q={q:.3f}")
+                print(f"  {i+1}. ({idx//BOARD_SIZE}, {idx%BOARD_SIZE}): {prob*100:.1f}%")
+
+        # MCTS
+        sims = input(f"\nMCTS simulations [{cfg.NUM_SIMULATIONS}, 0=skip]: ").strip()
+        if sims.lower() == 'q':
+            break
+        num_sims = int(sims) if sims else cfg.NUM_SIMULATIONS
+
+        if num_sims > 0:
+            print(f"\nRunning {num_sims} simulations...")
+            # Convert state to canonical form for MCTS (current player's stones = +1)
+            # MCTS internally maintains canonical form, so we need to convert from absolute
+            canonical_state = state.copy()
+            canonical_state[:NUM_POSITIONS] *= player  # Flip if White's turn
+            root = Node(prior_prob=0, player=player, action_index=None)
+            root.set_state(canonical_state)
+            root = mcts.run_simulation(root, num_sims, player, add_noise=False)
+
+            visits = [(idx, child.total_visits_N, child.mean_action_value_of_next_state_Q)
+                      for idx, child in root.children.items()]
+            visits.sort(key=lambda x: x[1], reverse=True)
+
+            print("\nMCTS visits (top 10):")
+            for i, (idx, v, q) in enumerate(visits[:10]):
+                if idx == PASS_ACTION:
+                    print(f"  {i+1}. pass: {v} visits, Q={q:.3f}")
+                else:
+                    print(f"  {i+1}. ({idx//BOARD_SIZE}, {idx%BOARD_SIZE}): {v} visits, Q={q:.3f}")
+
+
+        print("\n" + "="*50 + "\n")
+
+    print("Goodbye!")
 
 
 if __name__ == "__main__":
