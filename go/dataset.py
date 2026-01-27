@@ -37,11 +37,6 @@ class GoDataset:
                 torch.tensor(v, dtype=torch.float),
                 torch.tensor(p, dtype=torch.float))
 
-
-# Alias for backward compatibility
-TicTacToeDataset = GoDataset
-
-
 class TrainingDataset:
     def __init__(self):
         self.training_dataset = []
