@@ -27,7 +27,7 @@ def format_board_state(state, last_move=None):
     board = state[:NUM_POSITIONS]
     board_2d = board.reshape(BOARD_SIZE, BOARD_SIZE)
 
-    # Symbols: ● for Black, ○ for White, + for empty
+    # Symbols: ○ for Black, ● for White, + for empty
     # Last move is highlighted with brackets: [●] or [○]
     lines = []
 
@@ -43,9 +43,9 @@ def format_board_state(state, last_move=None):
             is_last_move = (last_move == (row_idx, col_idx))
 
             if cell == 1:
-                symbol = "[●]" if is_last_move else " ● "
-            elif cell == -1:
                 symbol = "[○]" if is_last_move else " ○ "
+            elif cell == -1:
+                symbol = "[●]" if is_last_move else " ● "
             else:
                 symbol = " + "
 
@@ -137,7 +137,7 @@ def play_game_bot_first(game, mcts, random_player, num_simulations=1600):
             last_move = action_index_to_coords(action_index)
             history.append({
                 'move_number': move_number,
-                'player': 'Bot (Black/●)',
+                'player': 'Bot (Black/○)',
                 'action': last_move,
                 'board': format_board_state(state, last_move=last_move if last_move != "pass" else None),
                 'visit_counts': visit_counts
@@ -151,7 +151,7 @@ def play_game_bot_first(game, mcts, random_player, num_simulations=1600):
             last_move = action_index_to_coords(action_index)
             history.append({
                 'move_number': move_number,
-                'player': 'Random (White/○)',
+                'player': 'Random (White/●)',
                 'action': last_move,
                 'board': format_board_state(state, last_move=last_move if last_move != "pass" else None),
                 'visit_counts': None
@@ -201,7 +201,7 @@ def play_game_random_first(game, mcts, random_player, num_simulations=1600):
             last_move = action_index_to_coords(action_index)
             history.append({
                 'move_number': move_number,
-                'player': 'Bot (White/○)',
+                'player': 'Bot (White/●)',
                 'action': last_move,
                 'board': format_board_state(state, last_move=last_move if last_move != "pass" else None),
                 'visit_counts': visit_counts
@@ -215,7 +215,7 @@ def play_game_random_first(game, mcts, random_player, num_simulations=1600):
             last_move = action_index_to_coords(action_index)
             history.append({
                 'move_number': move_number,
-                'player': 'Random (Black/●)',
+                'player': 'Random (Black/○)',
                 'action': last_move,
                 'board': format_board_state(state, last_move=last_move if last_move != "pass" else None),
                 'visit_counts': None
@@ -435,9 +435,9 @@ def main():
 
             f.write("-" * 70 + "\n")
             f.write(f"GAME {game_num + 1}\n")
-            f.write(f"Bot Position: {'First (Black/●)' if bot_pos == 'first' else 'Second (White/○)'}\n")
+            f.write(f"Bot Position: {'First (Black/○)' if bot_pos == 'first' else 'Second (White/●)'}\n")
             f.write(f"Outcome: {outcome.replace('_', ' ').title()}\n")
-            f.write(f"Legend: ● = Black, ○ = White, + = Empty, [●]/[○] = Last move\n")
+            f.write(f"Legend: ○ = Black, ● = White, + = Empty, [○]/[●] = Last move\n")
             f.write("-" * 70 + "\n\n")
 
             for turn in history:
