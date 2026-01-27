@@ -1,8 +1,8 @@
 class Config:
     BATCH_SIZE = 512
 
-    EPOCHS = 200
-    SELFPLAY_GAMES = 1000
+    EPOCHS = 50            
+    SELFPLAY_GAMES = 500   
 
     SAVE_MODEL_PATH = "models"
     SAVE_PICKLES = "pickles"

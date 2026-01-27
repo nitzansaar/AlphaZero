@@ -83,3 +83,4 @@ nn_losses/
 nn_check_pts/
 
 src/test_results.txt
+go/backup*
