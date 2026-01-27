@@ -14,22 +14,59 @@ import matplotlib.pyplot as plt
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-def format_board_state(state):
-    """Convert board state to a readable 2D representation."""
+def format_board_state(state, last_move=None):
+    """Convert board state to a readable 2D representation with Go-style grid.
+
+    Args:
+        state: The game state
+        last_move: Tuple (row, col) of the last move, or 'pass', or None
+
+    Returns:
+        List of strings representing the board
+    """
     board = state[:NUM_POSITIONS]
     board_2d = board.reshape(BOARD_SIZE, BOARD_SIZE)
-    formatted = []
-    for row in board_2d:
-        formatted_row = []
-        for cell in row:
+
+    # Symbols: ● for Black, ○ for White, + for empty
+    # Last move is highlighted with brackets: [●] or [○]
+    lines = []
+
+    # Column headers
+    header = "     " + "   ".join([str(i) for i in range(BOARD_SIZE)])
+    lines.append(header)
+    lines.append("")
+
+    for row_idx in range(BOARD_SIZE):
+        row_str = f" {row_idx}   "
+        for col_idx in range(BOARD_SIZE):
+            cell = board_2d[row_idx, col_idx]
+            is_last_move = (last_move == (row_idx, col_idx))
+
             if cell == 1:
-                formatted_row.append('X')
+                symbol = "[●]" if is_last_move else " ● "
             elif cell == -1:
-                formatted_row.append('O')
+                symbol = "[○]" if is_last_move else " ○ "
             else:
-                formatted_row.append('.')
-        formatted.append(formatted_row)
-    return formatted
+                symbol = " + "
+
+            if col_idx < BOARD_SIZE - 1:
+                # Remove trailing space and add connector
+                row_str += symbol.rstrip() + "──"
+            else:
+                row_str += symbol.rstrip()
+
+        row_str += f"   {row_idx}"
+        lines.append(row_str)
+
+        # Vertical connectors (except after last row)
+        if row_idx < BOARD_SIZE - 1:
+            connector = "     " + "│   " * (BOARD_SIZE - 1) + "│"
+            lines.append(connector)
+
+    lines.append("")
+    lines.append(header)
+
+    return lines
 
 
 def action_index_to_coords(action_index):
@@ -58,6 +95,17 @@ class RandomPlayer:
         return action
 
 
+def get_visit_counts(root_node):
+    """Extract visit counts from MCTS root node children."""
+    visit_counts = {}
+    for action_idx, child in root_node.children.items():
+        coords = action_index_to_coords(action_idx)
+        visit_counts[coords] = child.total_visits_N
+    # Sort by visit count descending
+    sorted_visits = sorted(visit_counts.items(), key=lambda x: x[1], reverse=True)
+    return sorted_visits
+
+
 def play_game_bot_first(game, mcts, random_player, num_simulations=1600):
     """Play a single game with the bot going first (player 1)"""
     from mcts import Node
@@ -65,6 +113,16 @@ def play_game_bot_first(game, mcts, random_player, num_simulations=1600):
     player = 1
     state = game.state.copy()
     move_number = 0
+    history = []
+
+    # Record initial state
+    history.append({
+        'move_number': 0,
+        'player': None,
+        'action': None,
+        'board': format_board_state(state, last_move=None),
+        'visit_counts': None
+    })
 
     while game.win_or_draw(state) is None:
         move_number += 1
@@ -72,15 +130,32 @@ def play_game_bot_first(game, mcts, random_player, num_simulations=1600):
             node = Node(prior_prob=0, player=player, action_index=None)
             node.set_state(state.copy())
             root_node = mcts.run_simulation(root_node=node, num_simulations=num_simulations, player=player)
+            visit_counts = get_visit_counts(root_node)
             action, node, action_probs = mcts.select_move(node=root_node, mode="exploit", temperature=1)
             action_index = np.argmax(action)
             state = game.apply_move(state, action_index, player)
+            last_move = action_index_to_coords(action_index)
+            history.append({
+                'move_number': move_number,
+                'player': 'Bot (Black/●)',
+                'action': last_move,
+                'board': format_board_state(state, last_move=last_move if last_move != "pass" else None),
+                'visit_counts': visit_counts
+            })
         else:  # Random player's turn
             action = random_player.get_action(state, player)
             if action is None:
                 break
             action_index = np.argmax(action)
             state = game.apply_move(state, action_index, player)
+            last_move = action_index_to_coords(action_index)
+            history.append({
+                'move_number': move_number,
+                'player': 'Random (White/○)',
+                'action': last_move,
+                'board': format_board_state(state, last_move=last_move if last_move != "pass" else None),
+                'visit_counts': None
+            })
 
         player = -1 * player
 
@@ -92,7 +167,7 @@ def play_game_bot_first(game, mcts, random_player, num_simulations=1600):
     else:
         result = 0
 
-    return result
+    return result, history
 
 
 def play_game_random_first(game, mcts, random_player, num_simulations=1600):
@@ -102,6 +177,16 @@ def play_game_random_first(game, mcts, random_player, num_simulations=1600):
     player = 1
     state = game.state.copy()
     move_number = 0
+    history = []
+
+    # Record initial state
+    history.append({
+        'move_number': 0,
+        'player': None,
+        'action': None,
+        'board': format_board_state(state, last_move=None),
+        'visit_counts': None
+    })
 
     while game.win_or_draw(state) is None:
         move_number += 1
@@ -109,15 +194,32 @@ def play_game_random_first(game, mcts, random_player, num_simulations=1600):
             node = Node(prior_prob=0, player=player, action_index=None)
             node.set_state(state.copy())
             root_node = mcts.run_simulation(root_node=node, num_simulations=num_simulations, player=player)
+            visit_counts = get_visit_counts(root_node)
             action, node, action_probs = mcts.select_move(node=root_node, mode="exploit", temperature=1)
             action_index = np.argmax(action)
             state = game.apply_move(state, action_index, player)
+            last_move = action_index_to_coords(action_index)
+            history.append({
+                'move_number': move_number,
+                'player': 'Bot (White/○)',
+                'action': last_move,
+                'board': format_board_state(state, last_move=last_move if last_move != "pass" else None),
+                'visit_counts': visit_counts
+            })
         else:  # Random player's turn
             action = random_player.get_action(state, player)
             if action is None:
                 break
             action_index = np.argmax(action)
             state = game.apply_move(state, action_index, player)
+            last_move = action_index_to_coords(action_index)
+            history.append({
+                'move_number': move_number,
+                'player': 'Random (Black/●)',
+                'action': last_move,
+                'board': format_board_state(state, last_move=last_move if last_move != "pass" else None),
+                'visit_counts': None
+            })
 
         player = -1 * player
 
@@ -129,7 +231,7 @@ def play_game_random_first(game, mcts, random_player, num_simulations=1600):
     else:
         result = 0
 
-    return result
+    return result, history
 
 
 def main():
@@ -204,14 +306,15 @@ def main():
     print("=" * 60)
 
     results = []
+    all_game_histories = []
 
     print("\nPlaying bot vs random games (alternating first/second):")
     for game_num in tqdm(range(num_games), total=num_games):
         if game_num % 2 == 0:
-            result = play_game_bot_first(game, mcts, random_player, num_simulations)
+            result, history = play_game_bot_first(game, mcts, random_player, num_simulations)
             bot_position = 'first'
         else:
-            result = play_game_random_first(game, mcts, random_player, num_simulations)
+            result, history = play_game_random_first(game, mcts, random_player, num_simulations)
             bot_position = 'second'
 
         outcome = 'bot_win' if result == 1 else ('draw' if result == 0 else 'random_win')
@@ -221,6 +324,13 @@ def main():
             'bot_position': bot_position,
             'result': result,
             'outcome': outcome
+        })
+
+        all_game_histories.append({
+            'game_number': game_num,
+            'bot_position': bot_position,
+            'outcome': outcome,
+            'history': history
         })
 
     df_results = pd.DataFrame(results)
@@ -308,6 +418,55 @@ def main():
     plt.savefig(os.path.join(output_dir, "bot_vs_random_results.png"), dpi=150)
     plt.close()
     print(f"\nResults graph saved to: {os.path.join(output_dir, 'bot_vs_random_results.png')}")
+
+    # Save game histories to text file
+    history_file = os.path.join(output_dir, "game_history_log.txt")
+    with open(history_file, 'w') as f:
+        f.write("=" * 70 + "\n")
+        f.write("GAME HISTORY LOG - Bot vs Random Player (5x5 Go)\n")
+        f.write(f"Total Games: {num_games} | MCTS Simulations: {num_simulations}\n")
+        f.write("=" * 70 + "\n\n")
+
+        for game_data in all_game_histories:
+            game_num = game_data['game_number']
+            bot_pos = game_data['bot_position']
+            outcome = game_data['outcome']
+            history = game_data['history']
+
+            f.write("-" * 70 + "\n")
+            f.write(f"GAME {game_num + 1}\n")
+            f.write(f"Bot Position: {'First (Black/●)' if bot_pos == 'first' else 'Second (White/○)'}\n")
+            f.write(f"Outcome: {outcome.replace('_', ' ').title()}\n")
+            f.write(f"Legend: ● = Black, ○ = White, + = Empty, [●]/[○] = Last move\n")
+            f.write("-" * 70 + "\n\n")
+
+            for turn in history:
+                move_num = turn['move_number']
+                player = turn['player']
+                action = turn['action']
+                board_lines = turn['board']
+                visit_counts = turn['visit_counts']
+
+                if move_num == 0:
+                    f.write("Initial Board State:\n")
+                else:
+                    f.write(f"Move {move_num}: {player} plays {action}\n")
+
+                # Show visit counts for bot moves
+                if visit_counts is not None:
+                    f.write("  MCTS Visit Counts (top moves):\n")
+                    for i, (coords, visits) in enumerate(visit_counts[:10]):  # Show top 10
+                        f.write(f"    {coords}: {visits} visits\n")
+                    f.write("\n")
+
+                # Write the board (list of pre-formatted lines)
+                for line in board_lines:
+                    f.write(f"  {line}\n")
+                f.write("\n")
+
+            f.write("\n")
+
+    print(f"Game history log saved to: {history_file}")
     print("\n" + "=" * 60)
     print("Testing complete!")
 
