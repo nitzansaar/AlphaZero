@@ -251,42 +251,13 @@ def play_game(game, mcts, human_player, num_simulations=200):
 
 
 def load_model():
-    """Load the latest trained model."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    possible_dirs = [
-        os.path.join(script_dir, cfg.SAVE_MODEL_PATH),
-        cfg.SAVE_MODEL_PATH,
-    ]
-
-    for model_dir in possible_dirs:
-        all_models = glob(os.path.join(model_dir, "*_best_model.pt"))
-        if all_models:
-            models_with_time = []
-            for f in all_models:
-                try:
-                    mtime = os.path.getmtime(f)
-                    models_with_time.append((mtime, f))
-                except OSError:
-                    continue
-
-            if models_with_time:
-                models_with_time.sort(reverse=True)
-
-                for mtime, model_file in models_with_time:
-                    try:
-                        test_model = NeuralNetwork().to(device)
-                        test_state = torch.load(model_file, map_location=device)
-                        test_model.load_state_dict(test_state)
-                        print(f"Found compatible model: {os.path.basename(model_file)}")
-                        return model_file
-                    except (RuntimeError, FileNotFoundError):
-                        continue
-                    finally:
-                        del test_model
-                        if 'test_state' in locals():
-                            del test_state
-                        torch.cuda.empty_cache() if torch.cuda.is_available() else None
-
+    for model_dir in [os.path.join(script_dir, cfg.SAVE_MODEL_PATH), cfg.SAVE_MODEL_PATH]:
+        if os.path.isdir(model_dir):
+            models = glob(os.path.join(model_dir, "*_best_model.pt"))
+            if models:
+                models.sort(key=os.path.getmtime, reverse=True)
+                return models[0]
     return None
 
 
