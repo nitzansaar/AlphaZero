@@ -1,6 +1,6 @@
 import os
 from config import Config as cfg
-from game import Go, PASS_ACTION
+from game import Go, PASS_ACTION, NUM_POSITIONS
 from mcts import MonteCarloTreeSearch
 from dataset import TrainingDataset
 from tqdm import tqdm
@@ -44,7 +44,6 @@ if os.path.exists(save_path):
     print(f"Loaded existing dataset with {len(training_dataset.training_dataset)} samples")
 else:
     print("Starting with empty dataset")
-force_ended_games = 0
 
 for game_number in tqdm(range(num_games), total=num_games):
     node = root_node  # start with an empty board
@@ -53,13 +52,17 @@ for game_number in tqdm(range(num_games), total=num_games):
     move_count = 0
     force_ended = False
 
-    while game.win_or_draw(node.state, perspective=player) is None:
+    while game.winner(node.state, perspective=player) is None:
         # Check if we've exceeded max moves
         if move_count >= MAX_MOVES_PER_GAME:
             force_ended = True
             break
 
+        # Convert from relative form to absolute form for storing in dataset
+        # Node stores state in relative form (current player's perspective)
+        # Dataset should store absolute form (Black=+1, White=-1 always)
         parent_state = copy(node.state)
+        parent_state[:NUM_POSITIONS] *= player
         node = mcts.run_simulation(root_node=node, num_simulations=cfg.NUM_SIMULATIONS, player=player)
 
         # Temperature decay: use high temperature early, low temperature later
@@ -75,11 +78,10 @@ for game_number in tqdm(range(num_games), total=num_games):
 
     # For force-ended games, compute winner based on current territory
     if force_ended:
-        force_ended_games += 1
         # Compute winner by territory (as if both players passed)
         winner = game.get_winner(node.state, perspective=player)
     else:
-        winner = game.win_or_draw(node.state, perspective=player)
+        winner = game.winner(node.state, perspective=player)
 
     training_dataset.add_game_to_training_dataset(dataset, winner)
 
@@ -88,5 +90,4 @@ for game_number in tqdm(range(num_games), total=num_games):
         print("saving....", game_number)
 
 training_dataset.save(save_path)
-print(f"\nCompleted games: {num_games - force_ended_games}, Force-ended games: {force_ended_games}")
 print(f"Total training samples: {len(training_dataset.training_dataset)}")
