@@ -33,8 +33,8 @@ def display_board(state, game):
     """Display the board in traditional Go intersection style."""
     board_2d = format_board_state(state)
 
-    # Map cell values to intersection symbols
-    symbols = {'.': '+', 'X': '●', 'O': '○'}
+    # Map cell values to intersection symbols (Black=empty circle, White=filled circle)
+    symbols = {'.': '+', 'X': '○', 'O': '●'}
 
     # Column headers
     print("\n     ", end="")
@@ -75,16 +75,24 @@ def display_board(state, game):
     print()
 
 
-def get_human_move(game, state, player):
+def get_human_move(game, state, player, can_undo=False):
     """Get a valid move from the human player."""
     valid_moves = game.get_valid_moves(state, player)
 
     while True:
         try:
-            user_input = input("Enter your move (row col) or 'pass': ").strip().lower()
+            undo_hint = ", 'undo'" if can_undo else ""
+            user_input = input(f"Enter your move (row col), 'pass'{undo_hint}: ").strip().lower()
 
             if user_input in ['quit', 'q', 'exit']:
                 return None
+
+            if user_input == 'undo':
+                if can_undo:
+                    return 'undo'
+                else:
+                    print("Cannot undo - no moves to undo.")
+                    continue
 
             if user_input == 'pass':
                 return PASS_ACTION
@@ -155,6 +163,9 @@ def play_game(game, mcts, human_player, num_simulations=200):
     state = game.state.copy()
     current_player = 1  # Black always goes first
 
+    # Track game history for undo: list of (state, player) tuples
+    history = []
+
     print("\n" + "=" * 60)
     print("GAME START - 5x5 Go")
     print("=" * 60)
@@ -163,7 +174,7 @@ def play_game(game, mcts, human_player, num_simulations=200):
     print("\nRules: Capture opponent stones by surrounding them.")
     print("Game ends when both players pass consecutively.")
     print("Scoring: Area scoring with 2.5 komi for White.")
-    print("Enter moves as 'row col' (e.g., '2 2') or 'pass'")
+    print("Enter moves as 'row col' (e.g., '2 2'), 'pass', or 'undo'")
     print("Type 'quit' to exit")
     print("=" * 60)
 
@@ -178,18 +189,37 @@ def play_game(game, mcts, human_player, num_simulations=200):
             print(f"\n--- Move {move_count} ---")
             print(f"Your turn ({'Black' if human_player == 1 else 'White'})")
 
-            action_index = get_human_move(game, state, current_player)
+            can_undo = len(history) >= 2  # Need at least 2 moves to undo (human + bot)
+            action_index = get_human_move(game, state, current_player, can_undo)
 
             if action_index is None:
                 print("\nGame ended by user.")
                 return None
 
+            if action_index == 'undo':
+                # Undo both the bot's last move and the human's last move
+                if len(history) >= 2:
+                    history.pop()  # Remove bot's pre-move state
+                    state, current_player = history.pop()  # Restore to human's pre-move state
+                    move_count = len(history)
+                    print("\nUndid last two moves.")
+                    display_board(state, game)
+                    continue
+                else:
+                    print("Cannot undo - not enough moves.")
+                    move_count -= 1
+                    continue
+
+            # Save state before applying move
+            history.append((state.copy(), current_player))
             state = game.apply_move(state, action_index, current_player)
 
         else:
             print(f"\n--- Move {move_count} ---")
             print(f"Bot's turn ({'Black' if current_player == 1 else 'White'})")
 
+            # Save state before applying move
+            history.append((state.copy(), current_player))
             action_index = get_bot_move(game, mcts, state, current_player, num_simulations)
             state = game.apply_move(state, action_index, current_player)
 
