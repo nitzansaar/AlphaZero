@@ -78,7 +78,19 @@ class MonteCarloTreeSearch:
     def run_simulation(self, root_node, num_simulations=1600, player=1, add_noise=True):
         root_state = root_node.state
         next_player = -1 * player
-        value, action_probs = self.policy_value_network(root_state, player)
+
+        # Convert state to absolute form for neural network if needed
+        # Child nodes (parent is not None) store state in relative form
+        # Fresh nodes (parent is None) already have absolute form
+        if root_node.parent is not None:
+            # Child node: convert relative form to absolute form
+            absolute_state = root_state.copy()
+            absolute_state[:NUM_POSITIONS] *= player
+        else:
+            # Fresh node: already in absolute form
+            absolute_state = root_state
+
+        value, action_probs = self.policy_value_network(absolute_state, player)
         valid_moves = self.game.get_valid_moves(root_state, player)
         action_probs = action_probs * valid_moves
 
@@ -110,7 +122,10 @@ class MonteCarloTreeSearch:
             )
             leaf_node.set_state(leaf_node_state)
 
-            value, action_probs = self.policy_value_network(leaf_node_state, leaf_node.player)
+            # Convert from relative form to absolute form for neural network
+            absolute_leaf_state = leaf_node_state.copy()
+            absolute_leaf_state[:NUM_POSITIONS] *= leaf_node.player
+            value, action_probs = self.policy_value_network(absolute_leaf_state, leaf_node.player)
             winner = self.game.get_reward_for_next_player(leaf_node_state, leaf_node.player)
 
             if winner is None:

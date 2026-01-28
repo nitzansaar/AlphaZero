@@ -364,7 +364,7 @@ class Go:
         else:
             return 0
 
-    def win_or_draw(self, state, perspective=1):
+    def winner(self, state, perspective=1):
         """
         Check game state and return result.
         Returns 1 (black wins), -1 (white wins), 0 (draw), or None (game ongoing).
@@ -388,7 +388,7 @@ class Go:
         Returns:
             1 (Black wins), -1 (White wins), 0 (draw), or None (game ongoing)
         """
-        result = self.win_or_draw(state, perspective=player)
+        result = self.winner(state, perspective=player)
         return result
 
     def play(self, board_state, player, action_index, perspective=1):
@@ -405,7 +405,7 @@ class Go:
         # After the move, perspective shifts to the next player
         next_player = -player
         next_perspective = -perspective if perspective != 1 else 1
-        result = self.win_or_draw(new_state, perspective=next_perspective)
+        result = self.winner(new_state, perspective=next_perspective)
         return new_state, result, next_player
 
     def render(self, state):
