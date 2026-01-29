@@ -11,6 +11,9 @@ from glob import glob
 # Maximum moves per game - force end if exceeded (5x5 board shouldn't need more than this)
 MAX_MOVES_PER_GAME = 100
 
+# Batch size for MCTS (number of leaf nodes to evaluate in parallel)
+MCTS_BATCH_SIZE = 32
+
 os.makedirs(cfg.SAVE_PICKLES, exist_ok=True)
 save_path = os.path.join(cfg.SAVE_PICKLES, cfg.DATASET_PATH)
 
@@ -33,7 +36,8 @@ else:
     vpn = ValuePolicyNetwork(path=None)
 
 policy_value_network = vpn.get_vp
-mcts = MonteCarloTreeSearch(game, policy_value_network)
+policy_value_network_batch = vpn.get_vp_batch
+mcts = MonteCarloTreeSearch(game, policy_value_network, policy_value_network_batch)
 root_node = mcts.init_root_node()
 num_games = cfg.SELFPLAY_GAMES
 
@@ -63,7 +67,13 @@ for game_number in tqdm(range(num_games), total=num_games):
         # Dataset should store absolute form (Black=+1, White=-1 always)
         parent_state = copy(node.state)
         parent_state[:NUM_POSITIONS] *= player
-        node = mcts.run_simulation(root_node=node, num_simulations=cfg.NUM_SIMULATIONS, player=player)
+        # Use batched MCTS for much better GPU utilization
+        node = mcts.run_simulation_batched(
+            root_node=node,
+            num_simulations=cfg.NUM_SIMULATIONS,
+            player=player,
+            batch_size=MCTS_BATCH_SIZE
+        )
 
         # Temperature decay: use high temperature early, low temperature later
         if move_count < cfg.TEMP_THRESHOLD:
