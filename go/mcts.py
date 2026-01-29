@@ -5,22 +5,24 @@ from config import Config as cfg
 from game import NUM_POSITIONS, PASS_ACTION, ACTION_SIZE
 
 class Node:
+    """
+    MCTS tree node.
+
+    State representation:
+    - States are stored in CANONICAL form where current player's stones = 1
+    - node.player stores the ABSOLUTE player identity (1=Black, -1=White)
+    - To convert canonical to absolute: multiply board by node.player
+    """
     def __init__(self, prior_prob, player, parent=None, action_index=None):
-        self.state = None
-        self.player = player
+        self.state = None  # State is set later via set_state()
+        self.player = player  # Absolute player (1=Black, -1=White)
         self.total_visits_N = 0
         self.total_action_value_of_next_state_W = 0
         self.mean_action_value_of_next_state_Q = 0
         self.prior_probs_P = prior_prob
         self.children = {}
         self.parent = parent
-        if action_index is not None:
-            state = copy(parent.state)
-            # Flip board perspective (only the board portion, not ko/passes)
-            state[:NUM_POSITIONS] = state[:NUM_POSITIONS] * -1
-            if action_index != PASS_ACTION:
-                state[action_index] = -1
-            self.state = copy(state)
+        self.virtual_loss = 0  # For parallel MCTS - temporarily makes node look worse
 
     def set_state(self, state):
         self.state = state
@@ -34,14 +36,24 @@ class Node:
         return len(self.children) == 0
 
     def select_best_child(self):
+        """
+        Select child with highest UCB score.
+        Virtual loss is incorporated to discourage multiple parallel traversals
+        from selecting the same path.
+        """
         best_uscore = float('-inf')
         best_child_index = None
         for i, child in self.children.items():
             psa = child.prior_probs_P
-            Ns = self.total_visits_N
-            Nsa = child.total_visits_N
+            # Include virtual loss in visit counts
+            Ns = self.total_visits_N + self.virtual_loss
+            Nsa = child.total_visits_N + child.virtual_loss
             Cs = cfg.MCTS_UCB_C
-            Q = child.mean_action_value_of_next_state_Q
+            # Adjust Q for virtual loss (treat virtual visits as losses)
+            if child.total_visits_N + child.virtual_loss > 0:
+                Q = (child.total_action_value_of_next_state_W - child.virtual_loss) / (child.total_visits_N + child.virtual_loss)
+            else:
+                Q = 0
             Uscore = Q + Cs * psa * math.sqrt(Ns) / (1 + Nsa)
             if best_uscore < Uscore:
                 best_uscore = Uscore
@@ -50,9 +62,10 @@ class Node:
 
 
 class MonteCarloTreeSearch:
-    def __init__(self, game, policy_value_network):
+    def __init__(self, game, policy_value_network, policy_value_network_batch=None):
         self.game = game
         self.policy_value_network = policy_value_network
+        self.policy_value_network_batch = policy_value_network_batch
 
     def init_root_node(self):
         # State size: 25 board positions + ko point + consecutive passes = 27
@@ -91,7 +104,10 @@ class MonteCarloTreeSearch:
             absolute_state = root_state
 
         value, action_probs = self.policy_value_network(absolute_state, player)
-        valid_moves = self.game.get_valid_moves(root_state, player)
+        # In canonical form, current player's stones = 1, so use player=1 for valid move check
+        # For fresh root nodes (absolute form), player is already 1 (Black starts)
+        valid_moves_player = 1 if root_node.parent is not None else player
+        valid_moves = self.game.get_valid_moves(root_state, valid_moves_player)
         action_probs = action_probs * valid_moves
 
         # Add Dirichlet noise at root for exploration (AlphaGo Zero style)
@@ -129,12 +145,150 @@ class MonteCarloTreeSearch:
             winner = self.game.get_reward_for_next_player(leaf_node_state, leaf_node.player)
 
             if winner is None:
-                valid_moves = self.game.get_valid_moves(leaf_node_state, leaf_node.player)
+                # leaf_node_state is in canonical form (current player's stones = 1)
+                # So always use player=1 for valid move checking
+                valid_moves = self.game.get_valid_moves(leaf_node_state, 1)
                 action_probs = action_probs * valid_moves
                 next_player = leaf_node.player * -1
                 leaf_node.expand(action_probs=action_probs, player=next_player, parent=leaf_node)
 
             self.backup(backup_steps, winner, player, value)
+        return root_node
+
+    def run_simulation_batched(self, root_node, num_simulations=1600, player=1, add_noise=True, batch_size=32):
+        """
+        AlphaGo Zero style batched MCTS simulation.
+
+        Uses virtual loss to collect multiple leaf nodes, evaluates them in a single
+        batched NN call, then backs up all results. Much more efficient GPU utilization.
+
+        Args:
+            root_node: The root node to start search from
+            num_simulations: Total number of simulations to run
+            player: Current player (1 or -1)
+            add_noise: Whether to add Dirichlet noise at root
+            batch_size: Number of leaf nodes to collect before batched NN evaluation
+        """
+        if self.policy_value_network_batch is None:
+            raise ValueError("Batch network function not provided. Use run_simulation instead.")
+
+        root_state = root_node.state
+        next_player = -1 * player
+
+        # Convert state to absolute form for neural network if needed
+        if root_node.parent is not None:
+            absolute_state = root_state.copy()
+            absolute_state[:NUM_POSITIONS] *= player
+        else:
+            absolute_state = root_state
+
+        # Initial expansion of root node (single NN call)
+        value, action_probs = self.policy_value_network(absolute_state, player)
+        valid_moves_player = 1 if root_node.parent is not None else player
+        valid_moves = self.game.get_valid_moves(root_state, valid_moves_player)
+        action_probs = action_probs * valid_moves
+
+        # Add Dirichlet noise at root for exploration
+        if add_noise:
+            noise = np.random.dirichlet([0.03] * len(action_probs))
+            action_probs = 0.75 * action_probs + 0.25 * noise
+            action_probs = action_probs * valid_moves
+            if np.sum(action_probs) > 0:
+                action_probs = action_probs / np.sum(action_probs)
+
+        root_node.expand(action_probs=action_probs, player=next_player, parent=root_node)
+
+        # Run simulations in batches
+        sim_count = 0
+        while sim_count < num_simulations:
+            current_batch_size = min(batch_size, num_simulations - sim_count)
+
+            # Collect leaf nodes with virtual loss
+            leaf_data = []  # List of (leaf_node, backup_steps, action_index, parent_node)
+
+            for _ in range(current_batch_size):
+                backup_steps = [root_node]
+                node = root_node
+
+                # Apply virtual loss as we traverse down
+                node.virtual_loss += 1
+
+                while not node.is_leaf_node():
+                    action_index, node = node.select_best_child()
+                    node.virtual_loss += 1
+                    backup_steps.append(node)
+
+                leaf_node = node
+                parent_node = backup_steps[-2] if len(backup_steps) > 1 else root_node
+
+                # Get the action that led to this leaf
+                action_index = None
+                for idx, child in parent_node.children.items():
+                    if child is leaf_node:
+                        action_index = idx
+                        break
+
+                leaf_data.append((leaf_node, backup_steps, action_index, parent_node))
+
+            # Compute states for all leaf nodes
+            states_to_eval = []
+            players_to_eval = []
+            valid_moves_list = []
+            leaf_states = []  # Store computed leaf states
+
+            for leaf_node, backup_steps, action_index, parent_node in leaf_data:
+                # Compute leaf state if not already set
+                if leaf_node.state is None and action_index is not None:
+                    action = np.zeros(ACTION_SIZE)
+                    action[action_index] = 1
+                    leaf_node_state = self.game.get_next_state_from_next_player_prespective(
+                        parent_node.state, action, player
+                    )
+                    leaf_node.set_state(leaf_node_state)
+
+                if leaf_node.state is not None:
+                    # Convert from canonical to absolute form for NN
+                    absolute_leaf_state = leaf_node.state.copy()
+                    absolute_leaf_state[:NUM_POSITIONS] *= leaf_node.player
+                    states_to_eval.append(absolute_leaf_state)
+                    players_to_eval.append(leaf_node.player)
+                    leaf_states.append(leaf_node.state)
+                    # Canonical form: current player = 1
+                    valid_moves = self.game.get_valid_moves(leaf_node.state, 1)
+                    valid_moves_list.append(valid_moves)
+
+            # Batch evaluate all leaf nodes with single NN call
+            if states_to_eval:
+                values, policies = self.policy_value_network_batch(states_to_eval, players_to_eval)
+            else:
+                values, policies = [], []
+
+            # Process results and backup
+            eval_idx = 0
+            for leaf_node, backup_steps, action_index, parent_node in leaf_data:
+                # Remove virtual loss from path
+                for node in backup_steps:
+                    node.virtual_loss -= 1
+
+                if leaf_node.state is None:
+                    continue
+
+                value = values[eval_idx] if eval_idx < len(values) else 0
+                action_probs = policies[eval_idx] if eval_idx < len(policies) else np.zeros(ACTION_SIZE)
+                valid_moves = valid_moves_list[eval_idx] if eval_idx < len(valid_moves_list) else np.ones(ACTION_SIZE)
+                eval_idx += 1
+
+                winner = self.game.get_reward_for_next_player(leaf_node.state, leaf_node.player)
+
+                if winner is None:
+                    action_probs = action_probs * valid_moves
+                    next_player = leaf_node.player * -1
+                    leaf_node.expand(action_probs=action_probs, player=next_player, parent=leaf_node)
+
+                self.backup(backup_steps, winner, player, value)
+
+            sim_count += current_batch_size
+
         return root_node
 
     def select_move(self, node, mode="exploit", temperature=1):
