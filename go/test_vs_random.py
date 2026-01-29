@@ -13,6 +13,9 @@ import matplotlib.pyplot as plt
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+# Batch size for MCTS (number of leaf nodes to evaluate in parallel)
+MCTS_BATCH_SIZE = 32
+
 
 def format_board_state(state, last_move=None):
     """Convert board state to a readable 2D representation with Go-style grid.
@@ -124,12 +127,14 @@ def play_game_bot_first(game, mcts, random_player, num_simulations=1600):
         'visit_counts': None
     })
 
-    while game.win_or_draw(state) is None:
+    while game.winner(state) is None:
         move_number += 1
         if player == 1:  # Bot's turn
             node = Node(prior_prob=0, player=player, action_index=None)
             node.set_state(state.copy())
-            root_node = mcts.run_simulation(root_node=node, num_simulations=num_simulations, player=player)
+            root_node = mcts.run_simulation_batched(
+                root_node=node, num_simulations=num_simulations, player=player, batch_size=MCTS_BATCH_SIZE
+            )
             visit_counts = get_visit_counts(root_node)
             action, node, action_probs = mcts.select_move(node=root_node, mode="exploit", temperature=1)
             action_index = np.argmax(action)
@@ -188,12 +193,14 @@ def play_game_random_first(game, mcts, random_player, num_simulations=1600):
         'visit_counts': None
     })
 
-    while game.win_or_draw(state) is None:
+    while game.winner(state) is None:
         move_number += 1
         if player == -1:  # Bot's turn
             node = Node(prior_prob=0, player=player, action_index=None)
             node.set_state(state.copy())
-            root_node = mcts.run_simulation(root_node=node, num_simulations=num_simulations, player=player)
+            root_node = mcts.run_simulation_batched(
+                root_node=node, num_simulations=num_simulations, player=player, batch_size=MCTS_BATCH_SIZE
+            )
             visit_counts = get_visit_counts(root_node)
             action, node, action_probs = mcts.select_move(node=root_node, mode="exploit", temperature=1)
             action_index = np.argmax(action)
@@ -293,7 +300,8 @@ def main():
     print(f"Loading model from: {model_path}")
     vpn = ValuePolicyNetwork(model_path)
     policy_value_network = vpn.get_vp
-    mcts = MonteCarloTreeSearch(game, policy_value_network)
+    policy_value_network_batch = vpn.get_vp_batch
+    mcts = MonteCarloTreeSearch(game, policy_value_network, policy_value_network_batch)
 
     random_player = RandomPlayer(game)
 
