@@ -74,3 +74,38 @@ class ValuePolicyNetwork:
         policy = policy.cpu().numpy().flatten()
 
         return value, policy
+
+    def get_vp_batch(self, states, players):
+        """
+        Get value and policy predictions for multiple board states in a single batch.
+        Much more efficient for GPU utilization than calling get_vp multiple times.
+
+        Args:
+            states: List of game state arrays (each 27 values: 25 board + ko + passes)
+            players: List of current players (1 or -1) for each state
+
+        Returns:
+            values: List of position evaluations (floats)
+            policies: List of move probability arrays (each 26 values)
+        """
+        if len(states) == 0:
+            return [], []
+
+        # Convert all states to canonical 3-plane representation
+        canonical_states = np.stack([
+            board_to_canonical_3d(state, player)
+            for state, player in zip(states, players)
+        ])
+
+        # Convert to tensor: (batch, 3, 5, 5)
+        state_tensor = torch.from_numpy(canonical_states).to(device)
+
+        with torch.no_grad():
+            values, policies = self.model(state_tensor)
+
+        # Single GPU->CPU sync for the entire batch
+        values = values.cpu().numpy().flatten()
+        policies = torch.nn.functional.softmax(policies, dim=1)
+        policies = policies.cpu().numpy()
+
+        return list(values), list(policies)
