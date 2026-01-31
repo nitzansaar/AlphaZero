@@ -1,9 +1,5 @@
 import numpy as np
-
-BOARD_SIZE = 5
-NUM_POSITIONS = BOARD_SIZE * BOARD_SIZE  # 25
-PASS_ACTION = NUM_POSITIONS  # Action index 25 is pass
-ACTION_SIZE = NUM_POSITIONS + 1  # 26 total actions (25 positions + pass)
+from config import BOARD_SIZE, NUM_POSITIONS, PASS_ACTION, ACTION_SIZE, KOMI
 
 
 def board_to_canonical_3d(board_flat, player):
@@ -11,11 +7,11 @@ def board_to_canonical_3d(board_flat, player):
     Convert flat board state to canonical 3-plane representation.
 
     Args:
-        board_flat: Flat array of 25 values (from game.state)
+        board_flat: Flat array of NUM_POSITIONS values (from game.state)
         player: Current player (1 or -1)
 
     Returns:
-        3-plane numpy array of shape (3, 5, 5):
+        3-plane numpy array of shape (3, BOARD_SIZE, BOARD_SIZE):
         - Plane 0: Current player positions
         - Plane 1: Opponent positions
         - Plane 2: Empty positions
@@ -58,16 +54,16 @@ def get_neighbors(idx):
 
 class Go:
     """
-    5x5 Go game implementation.
+    Go game implementation (supports multiple board sizes).
 
     State representation:
-    - Positions 0-24: Board state (0=empty, 1=black, -1=white)
-    - Position 25: Ko point (-1 if no ko, else the forbidden position index)
-    - Position 26: Consecutive passes count (0, 1, or 2)
+    - Positions 0 to NUM_POSITIONS-1: Board state (0=empty, 1=black, -1=white)
+    - Position NUM_POSITIONS: Ko point (-1 if no ko, else the forbidden position index)
+    - Position NUM_POSITIONS+1: Consecutive passes count (0, 1, or 2)
 
     Actions:
-    - 0-24: Place stone at that position
-    - 25: Pass
+    - 0 to NUM_POSITIONS-1: Place stone at that position
+    - PASS_ACTION: Pass
     """
 
     def __init__(self):
@@ -334,7 +330,7 @@ class Go:
         """
         Determine the winner of the game.
         Returns 1 (black wins), -1 (white wins), or 0 (draw).
-        Uses area scoring with 2.5 komi for white (standard for 5x5).
+        Uses area scoring with komi for white.
 
         Args:
             state: Game state (may be in canonical form)
@@ -353,9 +349,7 @@ class Go:
         black_score, white_score = self.count_territory(board)
 
         # Apply komi (compensation for white going second)
-        # 2.5 komi is typical for 5x5 Go
-        komi = 2.5
-        white_score += komi
+        white_score += KOMI
 
         if black_score > white_score:
             return 1
