@@ -1,28 +1,40 @@
-# AlphaGo Zero Agent
+# AlphaZero Agent
 
-A reinforcement learning agent that learns to play board games optimally without human knowledge via self-play, guided by a policy/value neural network and Monte Carlo Tree Search (MCTS).
+AlphaZero-style reinforcement learning for board games. Learns through MCTS-guided self-play with a dual-head neural network (policy + value).
 
-Currently supports:
-- 9 by 9, 5 in a row Connect Five 
-- 5 by 5 Go
+Supports:
+- Connect Five (9x9 board)
+- Go (5x5 and 9x9)
 
-## Project Overview
+## Go
 
-This project implements a complete AlphaZero-inspired reinforcement learning system that:
-- Learns optimal strategies through MCTS-guided self-play
-- Uses dual-head neural network (policy + value)
+```bash
+cd go
 
-## Train model
-- chmod +x ./train.sh
-- ./train.sh
+# Training
+./run_5x5.sh train [iterations]
+./run_9x9.sh train [iterations]
 
-## Play against the bot (Human vs Bot)
-- python3 tictactoe/play_human_vs_bot_flask.py 
-- python3 go/play_human_vs_bot.py
+# Testing
+./run_5x5.sh test-random [games]
+./run_5x5.sh test-minimax [games] [depth]
 
-## Simulate play versus random player
-- python3 test_vs_random.py
+# Play against bot
+python play_human_vs_bot.py
+```
 
-## Simulate play vs bot
-- python3 test_bot_vs_bot.py
+## Connect Five (TicTacToe)
 
+```bash
+cd tictactoe
+
+# Training
+./train.sh
+
+# Play against bot
+python play_human_vs_bot_flask.py
+
+# Testing
+python test_vs_random.py
+python test_bot_vs_bot.py
+```
