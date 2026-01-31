@@ -11,11 +11,11 @@ class Config:
     LOGDIR = "logs"
     EVAL_GAMES = 40
     ACTION_SIZE = 26  # number of possible actions (5x5 board) - 25 positions + 1 for pass
-    NUM_GAMES = 100
+    NUM_GAMES = 1000
 
-    NUM_SIMULATIONS = 1200
+    NUM_SIMULATIONS = 1600
 
-    DATASET_QUEUE_SIZE = 40000
+    DATASET_QUEUE_SIZE = 100000
 
     # AlphaGo Zero specific parameters
     MCTS_UCB_C = 1.414  # sqrt(2) - exploration constant for UCB formula

@@ -225,7 +225,7 @@ def play_game(game, mcts, human_player, num_simulations=200):
 
         display_board(state, game)
 
-        result = game.win_or_draw(state)
+        result = game.winner(state)
 
         if result is not None:
             print("\n" + "=" * 60)
