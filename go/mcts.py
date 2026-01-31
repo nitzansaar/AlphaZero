@@ -40,6 +40,10 @@ class Node:
         Select child with highest UCB score.
         Virtual loss is incorporated to discourage multiple parallel traversals
         from selecting the same path.
+
+        Note: Q values are stored from the child's player perspective.
+        Since players alternate, parent wants to MINIMIZE child's value,
+        so we use -Q in the UCB formula.
         """
         best_uscore = float('-inf')
         best_child_index = None
@@ -54,7 +58,8 @@ class Node:
                 Q = (child.total_action_value_of_next_state_W - child.virtual_loss) / (child.total_visits_N + child.virtual_loss)
             else:
                 Q = 0
-            Uscore = Q + Cs * psa * math.sqrt(Ns) / (1 + Nsa)
+            # Use -Q because Q is from child's perspective, but parent wants to maximize parent's value
+            Uscore = -Q + Cs * psa * math.sqrt(Ns) / (1 + Nsa)
             if best_uscore < Uscore:
                 best_uscore = Uscore
                 best_child_index = i
@@ -76,16 +81,40 @@ class MonteCarloTreeSearch:
         root_node.set_state(root_state)
         return root_node
 
-    def backup(self, mtc_steps, winner, player, value):
+    def backup(self, mtc_steps, winner, leaf_player, value):
+        """
+        Backup value through the tree from leaf to root.
+
+        Args:
+            mtc_steps: List of nodes from root to leaf
+            winner: Game result (1=Black wins, -1=White wins, 0=draw, None=ongoing)
+            leaf_player: The player at the leaf node (whose perspective the NN value is from)
+            value: NN's value estimate (from leaf_player's perspective)
+        """
+        # Start with the value from the leaf's perspective
+        # We need to track whose perspective the current value is from
+        current_value_perspective = leaf_player
+
         for node in reversed(mtc_steps):
             node.total_visits_N += 1
-            if winner is None:
-                pass  # game not over, use nn estimated value
-            elif winner == 0:
-                value = 0
+
+            if winner is not None:
+                # Terminal state: use actual game outcome
+                if winner == 0:
+                    node_value = 0
+                else:
+                    # Value from node's player perspective: +1 if they won, -1 if they lost
+                    node_value = 1 if winner == node.player else -1
             else:
-                value = -1 if winner == node.player else 1
-            node.total_action_value_of_next_state_W = node.total_action_value_of_next_state_W + value
+                # Non-terminal: use NN value, but adjust for perspective
+                # If current_value_perspective matches node.player, use value directly
+                # Otherwise, negate it
+                if current_value_perspective == node.player:
+                    node_value = value
+                else:
+                    node_value = -value
+
+            node.total_action_value_of_next_state_W += node_value
             node.mean_action_value_of_next_state_Q = node.total_action_value_of_next_state_W / node.total_visits_N
 
     def run_simulation(self, root_node, num_simulations=1600, player=1, add_noise=True):
@@ -152,7 +181,7 @@ class MonteCarloTreeSearch:
                 next_player = leaf_node.player * -1
                 leaf_node.expand(action_probs=action_probs, player=next_player, parent=leaf_node)
 
-            self.backup(backup_steps, winner, player, value)
+            self.backup(backup_steps, winner, leaf_node.player, value)
         return root_node
 
     def run_simulation_batched(self, root_node, num_simulations=1600, player=1, add_noise=True, batch_size=32):
@@ -285,7 +314,7 @@ class MonteCarloTreeSearch:
                     next_player = leaf_node.player * -1
                     leaf_node.expand(action_probs=action_probs, player=next_player, parent=leaf_node)
 
-                self.backup(backup_steps, winner, player, value)
+                self.backup(backup_steps, winner, leaf_node.player, value)
 
             sim_count += current_batch_size
 
