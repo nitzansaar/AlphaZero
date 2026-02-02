@@ -20,7 +20,7 @@ _script_dir = os.path.dirname(os.path.abspath(__file__))
 if not os.path.isabs(cfg.LOGDIR):
     cfg.LOGDIR = os.path.join(_script_dir, cfg.LOGDIR)
 
-output_dir = os.path.join(_script_dir, "test_output")
+output_dir = os.path.join(_script_dir, cfg.TEST_OUTPUT_PATH)
 os.makedirs(output_dir, exist_ok=True)
 
 def load_training_history():

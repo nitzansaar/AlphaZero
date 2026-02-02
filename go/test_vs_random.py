@@ -418,7 +418,7 @@ def main():
 
     # Save results
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    output_dir = os.path.join(script_dir, "test_output")
+    output_dir = os.path.join(script_dir, cfg.TEST_OUTPUT_PATH)
     os.makedirs(output_dir, exist_ok=True)
 
     # Create visualizations

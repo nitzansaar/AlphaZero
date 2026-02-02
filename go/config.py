@@ -70,6 +70,7 @@ class Config5x5:
     DATASET_PATH = "training_dataset.pkl"
     BEST_MODEL = "{}_best_model.pt"
     LOGDIR = "logs_5x5"
+    TEST_OUTPUT_PATH = "test_output_5x5"
 
     # Evaluation
     EVAL_GAMES = 40
@@ -125,6 +126,7 @@ class Config9x9:
     DATASET_PATH = "training_dataset.pkl"
     BEST_MODEL = "{}_best_model.pt"
     LOGDIR = "logs_9x9"
+    TEST_OUTPUT_PATH = "test_output_9x9"
 
     # Evaluation
     EVAL_GAMES = 40
@@ -187,6 +189,7 @@ def print_config():
     print(f"  Models: {Config.SAVE_MODEL_PATH}")
     print(f"  Data: {Config.SAVE_PICKLES}")
     print(f"  Logs: {Config.LOGDIR}")
+    print(f"  Test Output: {Config.TEST_OUTPUT_PATH}")
     print(f"{'='*50}")
 
 

@@ -397,7 +397,7 @@ def main():
         print(f"  Losses: {second_losses} ({second_losses/len(second_games)*100:.1f}%)")
 
     # Save results
-    output_dir = os.path.join(script_dir, "test_output")
+    output_dir = os.path.join(script_dir, cfg.TEST_OUTPUT_PATH)
     os.makedirs(output_dir, exist_ok=True)
 
     # Create visualizations
