@@ -135,8 +135,6 @@ def run_analysis(state, player, game, vpn, mcts, num_sims):
         masked_policy = masked_policy / policy_sum
 
     print(f'\n  NN Value (from current player perspective): {value:+.4f}')
-    win_pct = (value + 1) / 2 * 100
-    print(f'  Estimated win%: {win_pct:.1f}%')
 
     render_heatmap(masked_policy, 'NN Policy (masked & normalized)', state, game)
     render_top_moves(masked_policy, 'NN Policy')
@@ -144,9 +142,16 @@ def run_analysis(state, player, game, vpn, mcts, num_sims):
     # --- MCTS ---
     print(f'\n  Running MCTS with {num_sims} simulations...')
 
-    root_node = Node(prior_prob=0, player=player, action_index=None)
-    root_node.set_state(state)
-    root_node = mcts.run_simulation(root_node, num_simulations=num_sims, player=player, add_noise=False)
+    # MCTS expects the root state in canonical form (current player's stones = 1).
+    # analyze_board stores state in absolute form (black=1, white=-1), so we must
+    # convert when white is to move. We then run MCTS as player=1 so the internal
+    # state tracking stays consistent.
+    mcts_state = state.copy()
+    if player == -1:
+        mcts_state[:NUM_POSITIONS] *= -1
+    root_node = Node(prior_prob=0, player=1, action_index=None)
+    root_node.set_state(mcts_state)
+    root_node = mcts.run_simulation(root_node, num_simulations=num_sims, player=1, add_noise=False)
 
     # Extract visit distribution
     visit_counts = np.zeros(ACTION_SIZE)
@@ -157,12 +162,6 @@ def run_analysis(state, player, game, vpn, mcts, num_sims):
 
     total_visits = np.sum(visit_counts)
     visit_dist = visit_counts / total_visits if total_visits > 0 else visit_counts
-
-    # MCTS value estimate from root
-    mcts_value = root_node.mean_action_value_of_next_state_Q
-    print(f'\n  MCTS Value (root Q): {mcts_value:+.4f}')
-    mcts_win_pct = (mcts_value + 1) / 2 * 100
-    print(f'  MCTS estimated win%: {mcts_win_pct:.1f}%')
 
     render_heatmap(visit_dist, 'MCTS Visit Distribution', state, game)
     render_top_moves(visit_dist, 'MCTS Visits')
@@ -180,22 +179,6 @@ def run_analysis(state, player, game, vpn, mcts, num_sims):
             r, c = idx_to_coord(idx)
             move_str = f'({r},{c})'
         print(f'  {move_str:>8}  {int(visits):>8}  {q:>+8.4f}')
-
-    # Side-by-side comparison
-    print(f'\n  Policy vs MCTS comparison (top moves):')
-    policy_ranked = sorted(range(ACTION_SIZE), key=lambda i: -masked_policy[i])
-    mcts_ranked = sorted(range(ACTION_SIZE), key=lambda i: -visit_dist[i])
-    print(f'  {"Rank":>4}  {"NN Policy Move":>14} {"Prob":>7}  |  {"MCTS Move":>10} {"Visits%":>8}')
-    print(f'  {"----":>4}  {"--------------":>14} {"-------":>7}  |  {"----------":>10} {"--------":>8}')
-    for rank in range(min(5, ACTION_SIZE)):
-        pi = policy_ranked[rank]
-        mi = mcts_ranked[rank]
-        def name(idx):
-            if idx == PASS_ACTION:
-                return 'pass'
-            r, c = idx_to_coord(idx)
-            return f'({r},{c})'
-        print(f'  {rank+1:>4}  {name(pi):>14} {masked_policy[pi]:>7.4f}  |  {name(mi):>10} {visit_dist[mi]:>8.4f}')
 
     print()
 
