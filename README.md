@@ -21,6 +21,10 @@ cd go
 
 # Play against bot
 python play_human_vs_bot.py
+
+# Analyze a board position (NN policy/value + MCTS distribution)
+BOARD_SIZE=5 python analyze_board.py
+BOARD_SIZE=9 python analyze_board.py --model models_9x9/10_best_model.pt --sims 800
 ```
 
 ## Connect Five (TicTacToe)
