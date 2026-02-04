@@ -10,6 +10,28 @@ from model import NeuralNetwork
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+# Column letters (skip I, standard Go convention)
+COL_LETTERS = 'ABCDEFGHJ'[:BOARD_SIZE]
+
+
+def col_to_letter(c):
+    return COL_LETTERS[c]
+
+
+def letter_to_col(ch):
+    ch = ch.upper()
+    if ch in COL_LETTERS:
+        return COL_LETTERS.index(ch)
+    return -1
+
+
+def move_name(idx):
+    """Convert an action index to a display string like 'C3' or 'pass'."""
+    if idx == PASS_ACTION:
+        return 'pass'
+    row, col = idx // BOARD_SIZE, idx % BOARD_SIZE
+    return f'{col_to_letter(col)}{BOARD_SIZE - row}'
+
 
 def format_board_state(state):
     """Convert board state to a readable 2D representation."""
@@ -37,21 +59,19 @@ def display_board(state, game):
     symbols = {'.': '+', 'X': '○', 'O': '●'}
 
     # Column headers
-    print("\n     ", end="")
-    for col in range(BOARD_SIZE):
-        print(f"{col}   ", end="")
-    print("\n")
+    print("\n     " + "   ".join(COL_LETTERS) + "\n")
 
     for row_idx, row in enumerate(board_2d):
+        row_num = BOARD_SIZE - row_idx
         # Print the row with intersections connected by horizontal lines
-        print(f" {row_idx}   ", end="")
+        print(f"{row_num:>2}   ", end="")
         for col_idx, cell in enumerate(row):
             symbol = symbols[cell]
             if col_idx < BOARD_SIZE - 1:
                 print(f"{symbol}───", end="")
             else:
                 print(f"{symbol}", end="")
-        print(f"   {row_idx}")
+        print(f"   {row_num}")
 
         # Print vertical connectors (except after last row)
         if row_idx < BOARD_SIZE - 1:
@@ -64,14 +84,12 @@ def display_board(state, game):
             print()
 
     # Column headers at bottom
-    print("\n     ", end="")
-    for col in range(BOARD_SIZE):
-        print(f"{col}   ", end="")
+    print("\n     " + "   ".join(COL_LETTERS))
 
     # Show game info
     ko = game.get_ko_point(state)
     passes = game.get_consecutive_passes(state)
-    print(f"\n\n  Ko point: {ko if ko >= 0 else 'None'}, Consecutive passes: {passes}")
+    print(f"\n  Ko point: {move_name(int(ko)) if ko >= 0 else 'None'}, Consecutive passes: {passes}")
     print()
 
 
@@ -82,30 +100,34 @@ def get_human_move(game, state, player, can_undo=False):
     while True:
         try:
             undo_hint = ", 'undo'" if can_undo else ""
-            user_input = input(f"Enter your move (row col), 'pass'{undo_hint}: ").strip().lower()
+            user_input = input(f"Enter your move (e.g. C3), 'pass'{undo_hint}: ").strip()
 
-            if user_input in ['quit', 'q', 'exit']:
+            if user_input.lower() in ['quit', 'q', 'exit']:
                 return None
 
-            if user_input == 'undo':
+            if user_input.lower() == 'undo':
                 if can_undo:
                     return 'undo'
                 else:
                     print("Cannot undo - no moves to undo.")
                     continue
 
-            if user_input == 'pass':
+            if user_input.lower() == 'pass':
                 return PASS_ACTION
 
-            parts = user_input.split()
-            if len(parts) != 2:
-                print(f"Invalid input. Enter row and column (0-{BOARD_SIZE-1}) or 'pass'")
+            # Parse letter+number (e.g. "C3", "a1")
+            user_input = user_input.strip().upper()
+            if len(user_input) < 2:
+                print(f"Invalid input. Enter column letter + row number (e.g. 'C3') or 'pass'")
                 continue
 
-            row, col = int(parts[0]), int(parts[1])
+            col_ch = user_input[0]
+            row_num = int(user_input[1:])
+            col = letter_to_col(col_ch)
+            row = BOARD_SIZE - row_num
 
-            if row < 0 or row >= BOARD_SIZE or col < 0 or col >= BOARD_SIZE:
-                print(f"Invalid coordinates. Row and column must be 0-{BOARD_SIZE-1}.")
+            if col < 0 or row < 0 or row >= BOARD_SIZE:
+                print(f"Invalid coordinates. Use A-{COL_LETTERS[-1]}, 1-{BOARD_SIZE}.")
                 continue
 
             action_index = row * BOARD_SIZE + col
@@ -117,7 +139,7 @@ def get_human_move(game, state, player, can_undo=False):
             return action_index
 
         except ValueError:
-            print("Invalid input. Please enter numbers (e.g., '2 2') or 'pass'")
+            print(f"Invalid input. Enter column letter + row number (e.g. 'C3') or 'pass'")
         except KeyboardInterrupt:
             print("\nGame interrupted by user.")
             return None
@@ -143,17 +165,9 @@ def get_bot_move(game, mcts, state, player, num_simulations=200):
     print("\nBot's top 3 moves:")
     for i, idx in enumerate(top_indices, 1):
         if visit_counts[idx] > 0:
-            if idx == PASS_ACTION:
-                print(f"  {i}. Pass: {int(visit_counts[idx])} visits")
-            else:
-                row, col = idx // BOARD_SIZE, idx % BOARD_SIZE
-                print(f"  {i}. Position ({row}, {col}): {int(visit_counts[idx])} visits")
+            print(f"  {i}. {move_name(idx)}: {int(visit_counts[idx])} visits")
 
-    if action_index == PASS_ACTION:
-        print(f"\nBot passes")
-    else:
-        row, col = action_index // BOARD_SIZE, action_index % BOARD_SIZE
-        print(f"\nBot plays at ({row}, {col})")
+    print(f"\nBot plays: {move_name(action_index)}")
 
     return action_index
 
@@ -167,14 +181,14 @@ def play_game(game, mcts, human_player, num_simulations=200):
     history = []
 
     print("\n" + "=" * 60)
-    print("GAME START - 5x5 Go")
+    print(f"GAME START - {BOARD_SIZE}x{BOARD_SIZE} Go")
     print("=" * 60)
-    print(f"You are playing as: {'Black (X, first)' if human_player == 1 else 'White (O, second)'}")
-    print(f"Bot is playing as: {'White (O, second)' if human_player == 1 else 'Black (X, first)'}")
+    print(f"You are playing as: {'Black (○, first)' if human_player == 1 else 'White (●, second)'}")
+    print(f"Bot is playing as: {'White (●, second)' if human_player == 1 else 'Black (○, first)'}")
     print("\nRules: Capture opponent stones by surrounding them.")
     print("Game ends when both players pass consecutively.")
-    print("Scoring: Area scoring with 2.5 komi for White.")
-    print("Enter moves as 'row col' (e.g., '2 2'), 'pass', or 'undo'")
+    print(f"Scoring: Area scoring with {cfg.KOMI} komi for White.")
+    print(f"Enter moves as column letter + row number (e.g. 'C3'), 'pass', or 'undo'")
     print("Type 'quit' to exit")
     print("=" * 60)
 
@@ -230,7 +244,7 @@ def play_game(game, mcts, human_player, num_simulations=200):
         if result is not None:
             print("\n" + "=" * 60)
             black_score, white_score = game.count_territory(game.get_board(state))
-            print(f"Final Score: Black {black_score} - White {white_score + 2.5} (with 2.5 komi)")
+            print(f"Final Score: Black {black_score} - White {white_score + cfg.KOMI} (with {cfg.KOMI} komi)")
 
             if result == 1:
                 if human_player == 1:
@@ -264,7 +278,7 @@ def load_model():
 def main():
     """Main function to run the human vs bot game."""
     print("\n" + "=" * 60)
-    print("Welcome to 5x5 Go")
+    print(f"Welcome to {BOARD_SIZE}x{BOARD_SIZE} Go")
     print("Human vs AlphaZero Bot")
     print("=" * 60)
 
