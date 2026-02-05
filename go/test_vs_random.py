@@ -25,10 +25,6 @@ if torch.cuda.is_available():
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-# Batch size for MCTS (number of leaf nodes to evaluate in parallel)
-MCTS_BATCH_SIZE = 32
-
-
 def format_board_state(state, last_move=None):
     """Convert board state to a readable 2D representation with Go-style grid.
 
@@ -144,8 +140,8 @@ def play_game_bot_first(game, mcts, random_player, num_simulations=1200):
         if player == 1:  # Bot's turn
             node = Node(prior_prob=0, player=player, action_index=None)
             node.set_state(state.copy())
-            root_node = mcts.run_simulation_batched(
-                root_node=node, num_simulations=num_simulations, player=player, add_noise=False, batch_size=MCTS_BATCH_SIZE
+            root_node = mcts.run_simulation(
+                root_node=node, num_simulations=num_simulations, player=player, add_noise=False
             )
             visit_counts = get_visit_counts(root_node)
             action, node, action_probs = mcts.select_move(node=root_node, mode="exploit", temperature=1)
@@ -210,8 +206,8 @@ def play_game_random_first(game, mcts, random_player, num_simulations=1200):
         if player == -1:  # Bot's turn
             node = Node(prior_prob=0, player=player, action_index=None)
             node.set_state(state.copy())
-            root_node = mcts.run_simulation_batched(
-                root_node=node, num_simulations=num_simulations, player=player, add_noise=False, batch_size=MCTS_BATCH_SIZE
+            root_node = mcts.run_simulation(
+                root_node=node, num_simulations=num_simulations, player=player, add_noise=False
             )
             visit_counts = get_visit_counts(root_node)
             action, node, action_probs = mcts.select_move(node=root_node, mode="exploit", temperature=1)
