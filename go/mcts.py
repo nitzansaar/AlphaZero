@@ -73,7 +73,7 @@ class MonteCarloTreeSearch:
         self.policy_value_network_batch = policy_value_network_batch
 
     def init_root_node(self):
-        # State size: 25 board positions + ko point + consecutive passes = 27
+        # State size: n*n board positions + ko point + consecutive passes
         root_state = np.zeros(NUM_POSITIONS + 2)
         root_state[NUM_POSITIONS] = -1  # No ko point
         root_state[NUM_POSITIONS + 1] = 0  # No consecutive passes
@@ -259,13 +259,26 @@ class MonteCarloTreeSearch:
 
                 leaf_data.append((leaf_node, backup_steps, action_index, parent_node))
 
-            # Compute states for all leaf nodes
+            # Deduplicate leaves - track unique leaves and their first occurrence
+            seen_leaves = {}  # leaf_node id -> index in unique_leaf_data
+            unique_leaf_data = []  # List of (leaf_node, action_index, parent_node)
+            leaf_to_paths = {}  # leaf_node id -> list of backup_steps
+
+            for leaf_node, backup_steps, action_index, parent_node in leaf_data:
+                leaf_id = id(leaf_node)
+                if leaf_id not in seen_leaves:
+                    seen_leaves[leaf_id] = len(unique_leaf_data)
+                    unique_leaf_data.append((leaf_node, action_index, parent_node))
+                    leaf_to_paths[leaf_id] = [backup_steps]
+                else:
+                    leaf_to_paths[leaf_id].append(backup_steps)
+
+            # Compute states for unique leaf nodes only
             states_to_eval = []
             players_to_eval = []
             valid_moves_list = []
-            leaf_states = []  # Store computed leaf states
 
-            for leaf_node, backup_steps, action_index, parent_node in leaf_data:
+            for leaf_node, action_index, parent_node in unique_leaf_data:
                 # Compute leaf state if not already set
                 if leaf_node.state is None and action_index is not None:
                     action = np.zeros(ACTION_SIZE)
@@ -281,23 +294,26 @@ class MonteCarloTreeSearch:
                     absolute_leaf_state[:NUM_POSITIONS] *= leaf_node.player
                     states_to_eval.append(absolute_leaf_state)
                     players_to_eval.append(leaf_node.player)
-                    leaf_states.append(leaf_node.state)
                     # Canonical form: current player = 1
                     valid_moves = self.game.get_valid_moves(leaf_node.state, 1)
                     valid_moves_list.append(valid_moves)
 
-            # Batch evaluate all leaf nodes with single NN call
+            # Batch evaluate unique leaf nodes with single NN call
             if states_to_eval:
                 values, policies = self.policy_value_network_batch(states_to_eval, players_to_eval)
             else:
                 values, policies = [], []
 
-            # Process results and backup
+            # Process results: expand once per leaf, backup all paths
             eval_idx = 0
-            for leaf_node, backup_steps, action_index, parent_node in leaf_data:
-                # Remove virtual loss from path
-                for node in backup_steps:
-                    node.virtual_loss -= 1
+            for leaf_node, action_index, parent_node in unique_leaf_data:
+                leaf_id = id(leaf_node)
+                all_paths = leaf_to_paths[leaf_id]
+
+                # Remove virtual loss from all paths to this leaf
+                for backup_steps in all_paths:
+                    for node in backup_steps:
+                        node.virtual_loss -= 1
 
                 if leaf_node.state is None:
                     continue
@@ -309,12 +325,15 @@ class MonteCarloTreeSearch:
 
                 winner = self.game.get_reward_for_next_player(leaf_node.state, leaf_node.player)
 
+                # Expand only once per unique leaf
                 if winner is None:
                     action_probs = action_probs * valid_moves
                     next_player = leaf_node.player * -1
                     leaf_node.expand(action_probs=action_probs, player=next_player, parent=leaf_node)
 
-                self.backup(backup_steps, winner, leaf_node.player, value)
+                # Backup all paths that led to this leaf
+                for backup_steps in all_paths:
+                    self.backup(backup_steps, winner, leaf_node.player, value)
 
             sim_count += current_batch_size
 
