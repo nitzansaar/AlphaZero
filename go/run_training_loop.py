@@ -59,13 +59,6 @@ def main():
         iter_time = time.time() - iter_start
         print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Iteration {i + 1} complete in {iter_time/60:.1f} minutes")
 
-        # Quick value sanity check after each iteration
-        run_command("python quick_value_test.py", "Quick value head sanity check")
-
-        # Optional full evaluation
-        if args.eval_every > 0 and (i + 1) % args.eval_every == 0:
-            run_command("python test_vs_random.py", "Evaluation: Testing against random player")
-
     total_time = time.time() - start_time
     print(f"\n{'='*60}")
     print(f"TRAINING COMPLETE")
