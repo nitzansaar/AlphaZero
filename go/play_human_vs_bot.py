@@ -1,4 +1,5 @@
 import os
+import argparse
 import numpy as np
 from glob import glob
 import torch
@@ -9,6 +10,13 @@ from value_policy_function import ValuePolicyNetwork
 from model import NeuralNetwork
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
+
+# ANSI color codes for board highlights
+COLOR_GREEN = "\033[92m"   # Rank 1 (best)
+COLOR_YELLOW = "\033[93m"  # Rank 2
+COLOR_CYAN = "\033[96m"    # Rank 3
+COLOR_RESET = "\033[0m"
+RANK_COLORS = {1: COLOR_GREEN, 2: COLOR_YELLOW, 3: COLOR_CYAN}
 
 # Column letters (skip I, standard Go convention)
 COL_LETTERS = 'ABCDEFGHJ'[:BOARD_SIZE]
@@ -51,12 +59,25 @@ def format_board_state(state):
     return formatted
 
 
-def display_board(state, game):
-    """Display the board in traditional Go intersection style."""
+def display_board(state, game, highlights=None):
+    """Display the board in traditional Go intersection style.
+
+    highlights: optional dict mapping action_index -> rank (1, 2, 3) to color empty intersections.
+    """
     board_2d = format_board_state(state)
 
     # Map cell values to intersection symbols (Black=empty circle, White=filled circle)
     symbols = {'.': '+', 'X': '○', 'O': '●'}
+
+    # Legend for highlights
+    if highlights:
+        legend_parts = []
+        for rank in sorted(highlights.values()):
+            if rank in RANK_COLORS:
+                color = RANK_COLORS[rank]
+                legend_parts.append(f"{color}+{COLOR_RESET} = #{rank}")
+        if legend_parts:
+            print("\n  Recommendations: " + "  ".join(dict.fromkeys(legend_parts)))
 
     # Column headers
     print("\n     " + "   ".join(COL_LETTERS) + "\n")
@@ -67,6 +88,12 @@ def display_board(state, game):
         print(f"{row_num:>2}   ", end="")
         for col_idx, cell in enumerate(row):
             symbol = symbols[cell]
+            # Color empty intersections that are recommended moves
+            if highlights and cell == '.':
+                action_idx = row_idx * BOARD_SIZE + col_idx
+                rank = highlights.get(action_idx)
+                if rank and rank in RANK_COLORS:
+                    symbol = f"{RANK_COLORS[rank]}+{COLOR_RESET}"
             if col_idx < BOARD_SIZE - 1:
                 print(f"{symbol}───", end="")
             else:
@@ -145,14 +172,54 @@ def get_human_move(game, state, player, can_undo=False):
             return None
 
 
+def show_bot_recommendation(game, mcts, state, player, num_simulations=200):
+    """Run MCTS and display the top 3 recommended moves for the human."""
+    print(f"\nBot recommendation... ({num_simulations} MCTS simulations)")
+
+    # MCTS expects canonical form (current player's stones = 1)
+    mcts_state = state.copy()
+    if player == -1:
+        mcts_state[:NUM_POSITIONS] *= -1
+    node = Node(prior_prob=0, player=1, action_index=None)
+    node.set_state(mcts_state)
+
+    root_node = mcts.run_simulation(root_node=node, num_simulations=num_simulations, player=1, add_noise=False)
+
+    visit_counts = np.zeros(ACTION_SIZE)
+    for k, v in root_node.children.items():
+        visit_counts[k] = v.total_visits_N
+
+    top_indices = np.argsort(visit_counts)[::-1][:3]
+
+    # Build highlights dict: action_index -> rank
+    highlights = {}
+    for i, idx in enumerate(top_indices, 1):
+        if visit_counts[idx] > 0 and idx != PASS_ACTION:
+            highlights[idx] = i
+
+    # Re-display board with highlighted recommendations
+    display_board(state, game, highlights=highlights)
+
+    print("Recommended moves:")
+    for i, idx in enumerate(top_indices, 1):
+        if visit_counts[idx] > 0:
+            color = RANK_COLORS.get(i, "")
+            reset = COLOR_RESET if color else ""
+            print(f"  {color}{i}. {move_name(idx)}: {int(visit_counts[idx])} visits{reset}")
+
+
 def get_bot_move(game, mcts, state, player, num_simulations=200):
     """Get the bot's move using MCTS."""
     print(f"\nBot is thinking... ({num_simulations} MCTS simulations)")
 
-    node = Node(prior_prob=0, player=player, action_index=None)
-    node.set_state(state.copy())
+    # MCTS expects canonical form (current player's stones = 1)
+    mcts_state = state.copy()
+    if player == -1:
+        mcts_state[:NUM_POSITIONS] *= -1
+    node = Node(prior_prob=0, player=1, action_index=None)
+    node.set_state(mcts_state)
 
-    root_node = mcts.run_simulation(root_node=node, num_simulations=num_simulations, player=player)
+    root_node = mcts.run_simulation(root_node=node, num_simulations=num_simulations, player=1, add_noise=False)
 
     action, _, action_probs = mcts.select_move(node=root_node, mode="exploit", temperature=0.1)
     action_index = np.argmax(action)
@@ -202,6 +269,8 @@ def play_game(game, mcts, human_player, num_simulations=200):
         if current_player == human_player:
             print(f"\n--- Move {move_count} ---")
             print(f"Your turn ({'Black' if human_player == 1 else 'White'})")
+
+            show_bot_recommendation(game, mcts, state, current_player, num_simulations)
 
             can_undo = len(history) >= 2  # Need at least 2 moves to undo (human + bot)
             action_index = get_human_move(game, state, current_player, can_undo)
@@ -277,12 +346,22 @@ def load_model():
 
 def main():
     """Main function to run the human vs bot game."""
+    parser = argparse.ArgumentParser(description="Play Go against an AlphaZero bot")
+    parser.add_argument("--model", type=str, default=None, help="Path to a specific model .pt file")
+    args = parser.parse_args()
+
     print("\n" + "=" * 60)
     print(f"Welcome to {BOARD_SIZE}x{BOARD_SIZE} Go")
     print("Human vs AlphaZero Bot")
     print("=" * 60)
 
-    model_path = load_model()
+    if args.model:
+        if not os.path.isfile(args.model):
+            print(f"\nERROR: Model file not found: {args.model}")
+            return
+        model_path = args.model
+    else:
+        model_path = load_model()
 
     if model_path is None:
         print("\nERROR: No trained model found!")
