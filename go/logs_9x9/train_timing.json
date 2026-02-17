@@ -1,0 +1,42 @@
+{
+  "timings": {
+    "load_data": 3.5742,
+    "data_transfer": 2.2667,
+    "forward_pass": 44.8604,
+    "backward_pass": 135.2698,
+    "optimizer_step": 1283.948,
+    "model_save": 3.5542
+  },
+  "details": {
+    "load_data": {
+      "total": 3.5742,
+      "calls": 1,
+      "avg": 3.574221
+    },
+    "data_transfer": {
+      "total": 2.2667,
+      "calls": 97700,
+      "avg": 2.3e-05
+    },
+    "forward_pass": {
+      "total": 44.8604,
+      "calls": 97700,
+      "avg": 0.000459
+    },
+    "backward_pass": {
+      "total": 135.2698,
+      "calls": 97700,
+      "avg": 0.001385
+    },
+    "optimizer_step": {
+      "total": 1283.948,
+      "calls": 97700,
+      "avg": 0.013142
+    },
+    "model_save": {
+      "total": 3.5542,
+      "calls": 53,
+      "avg": 0.067061
+    }
+  }
+}

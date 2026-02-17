@@ -1,0 +1,30 @@
+{
+  "timings": {
+    "state_copy": 0.0165,
+    "mcts_simulation": 2129.3351,
+    "move_selection": 0.2996,
+    "winner_check": 0.0012
+  },
+  "details": {
+    "state_copy": {
+      "total": 0.0165,
+      "calls": 24,
+      "avg": 0.000688
+    },
+    "mcts_simulation": {
+      "total": 2129.3351,
+      "calls": 24,
+      "avg": 88.722295
+    },
+    "move_selection": {
+      "total": 0.2996,
+      "calls": 24,
+      "avg": 0.012484
+    },
+    "winner_check": {
+      "total": 0.0012,
+      "calls": 24,
+      "avg": 4.9e-05
+    }
+  }
+}
