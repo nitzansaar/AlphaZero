@@ -9,6 +9,7 @@ from config import Config as cfg
 from glob import glob
 import pandas as pd
 import argparse
+from profiler import Timer
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using {device} device")
@@ -96,14 +97,17 @@ class Trainer:
         return all_data
 
     def train(self, use_mixed_precision=True):
-        self.train_data = self.load_data()
+        timer = Timer()
+
+        with timer.track("load_data"):
+            self.train_data = self.load_data()
 
         # Optimize DataLoader for RTX 5090
         train_dataloader = DataLoader(
             self.train_data,
             batch_size=cfg.BATCH_SIZE,
             shuffle=True,
-            num_workers=4,  # Parallel data loading
+            num_workers=8,  # Parallel data loading
             pin_memory=True,  # Faster data transfer to GPU
             persistent_workers=True  # Keep workers alive between epochs
         )
@@ -111,7 +115,7 @@ class Trainer:
         # AlphaGo Zero uses MSE for value and cross-entropy for policy
         # Policy loss: KL divergence between predicted policy and MCTS visit distribution
         value_criterion = nn.MSELoss().to(device)
-        
+
         # Custom policy loss: cross-entropy with soft targets (MCTS visit distribution)
         def policy_loss_fn(pred_logits, target_probs):
             """Compute cross-entropy loss with soft targets (probability distribution)"""
@@ -119,26 +123,26 @@ class Trainer:
             # Cross-entropy: -sum(target_probs * log(pred_probs))
             loss = -torch.sum(target_probs * log_probs, dim=1).mean()
             return loss
-        
+
         policy_criterion = policy_loss_fn
-        
+
         # Use Adam optimizer with weight decay (L2 regularization) like AlphaGo Zero
         optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=cfg.LEARNING_RATE,
             weight_decay=cfg.WEIGHT_DECAY
         )
-        
+
         # Learning rate schedule: decay by factor of 0.1 at specific epochs
         # AlphaGo Zero uses step decay, but we'll use ReduceLROnPlateau for adaptive learning
         lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 
+            optimizer,
             mode='min',
-            factor=0.5, 
+            factor=0.5,
             patience=10,  # Increased patience
-            threshold=0.0001, 
+            threshold=0.0001,
             threshold_mode='rel',
-            cooldown=5, 
+            cooldown=5,
             min_lr=1e-6,  # Minimum learning rate
             eps=1e-08
         )
@@ -156,30 +160,32 @@ class Trainer:
             train_aloss = 0
 
             for i, (X, v, p) in enumerate(train_dataloader): # iterate through the batch
-                X = X.to(device, non_blocking=True) # board state
-                v = v.to(device, non_blocking=True) # value target
-                p = p.to(device, non_blocking=True) # policy target
+                with timer.track("data_transfer"):
+                    X = X.to(device, non_blocking=True) # board state
+                    v = v.to(device, non_blocking=True) # value target
+                    p = p.to(device, non_blocking=True) # policy target
 
-                with autocast('cuda'):
-                    yv, yp = self.model(X)
+                with timer.track("forward_pass"):
+                    with autocast('cuda'):
+                        yv, yp = self.model(X)
 
-                    vloss = value_criterion(yv.squeeze(-1), v) # value loss
-                    aloss = policy_criterion(yp, p) # policy loss
-                    loss = vloss + aloss
+                        vloss = value_criterion(yv.squeeze(-1), v) # value loss
+                        aloss = policy_criterion(yp, p) # policy loss
+                        loss = vloss + aloss
 
                 train_loss += loss.item() # accumulate the loss
                 train_vloss += vloss.item()
                 train_aloss += aloss.item()
 
-                # Mixed precision backpropagation with gradient clipping
-                optimizer.zero_grad()
-                scaler.scale(loss).backward()
+                with timer.track("backward_pass"):
+                    optimizer.zero_grad(set_to_none=True)
+                    scaler.scale(loss).backward()
 
-                # Gradient clipping to prevent exploding gradients (important for ResNets)
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-                scaler.step(optimizer)
-                scaler.update()
+                with timer.track("optimizer_step"):
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                    scaler.step(optimizer)
+                    scaler.update()
 
             train_loss = train_loss / len(train_dataloader)
             train_vloss = train_vloss / len(train_dataloader)
@@ -194,8 +200,8 @@ class Trainer:
                 best_loss = train_loss
                 current_iteration = self.latest_file_number + 1
                 savepath = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(current_iteration))
-                # Save the original uncompiled model, not the compiled one
-                torch.save(self.original_model.state_dict(), savepath)
+                with timer.track("model_save"):
+                    torch.save(self.original_model.state_dict(), savepath)
                 print("Saving Model.....BL", savepath)
                 # Store iteration number for evaluation script
                 self.current_iteration = current_iteration
@@ -203,7 +209,12 @@ class Trainer:
             print(f"Epoch {epoch}:: Total Loss: {train_loss:.6f}; Value Loss: {train_vloss:.6f}; Policy Loss: {train_aloss:.6f}; LR: {current_lr:.2e}")
 
             history.append([epoch, train_loss, train_vloss, train_aloss])
-        
+
+        timer.print_summary("Training Timing")
+        timing_path = os.path.join(cfg.LOGDIR, "train_timing.json")
+        timer.save(timing_path)
+        print(f"Timing data saved to {timing_path}")
+
         history = pd.DataFrame(history,columns=["Epoch","Tr_Loss","Value_Loss","Policy_Loss"])
         current_iteration = self.latest_file_number + 1
         logpath = os.path.join(cfg.LOGDIR, "{}_history.csv".format(current_iteration))
