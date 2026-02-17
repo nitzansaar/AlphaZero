@@ -25,48 +25,57 @@ if torch.cuda.is_available():
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def format_board_state(state, last_move=None):
-    """Convert board state to a readable 2D representation with Go-style grid.
+# Standard Go column labels (skip 'I' to avoid confusion with 'J')
+GO_COLUMNS = "ABCDEFGHJKLMNOPQRST"
 
-    Args:
-        state: The game state
-        last_move: Tuple (row, col) of the last move, or 'pass', or None
 
-    Returns:
-        List of strings representing the board
+def coords_to_go_notation(coords):
+    """Convert (row, col) tuple to standard Go notation like 'D4'."""
+    if coords == "pass":
+        return "pass"
+    row, col = coords
+    col_letter = GO_COLUMNS[col]
+    row_number = BOARD_SIZE - row
+    return f"{col_letter}{row_number}"
+
+
+def format_board_state(state):
+    """Convert board state to a readable 2D representation with standard Go notation.
+
+    Uses letter columns (A-J, skipping I) and numbered rows counting from bottom.
     """
     board = state[:NUM_POSITIONS]
     board_2d = board.reshape(BOARD_SIZE, BOARD_SIZE)
 
-    # Symbols: ○ for Black, ● for White, + for empty
-    # Last move is highlighted with brackets: [●] or [○]
+    col_labels = GO_COLUMNS[:BOARD_SIZE]
+
     lines = []
 
-    # Column headers
-    header = "     " + "   ".join([str(i) for i in range(BOARD_SIZE)])
+    # Column header
+    header = "     " + "   ".join(col_labels)
     lines.append(header)
     lines.append("")
 
     for row_idx in range(BOARD_SIZE):
-        row_str = f" {row_idx}   "
+        row_num = BOARD_SIZE - row_idx
+
+        row_str = f"{row_num:2d}   "
         for col_idx in range(BOARD_SIZE):
             cell = board_2d[row_idx, col_idx]
-            is_last_move = (last_move == (row_idx, col_idx))
 
             if cell == 1:
-                symbol = "[○]" if is_last_move else " ○ "
+                symbol = "○"
             elif cell == -1:
-                symbol = "[●]" if is_last_move else " ● "
+                symbol = "●"
             else:
-                symbol = " + "
+                symbol = "+"
 
             if col_idx < BOARD_SIZE - 1:
-                # Remove trailing space and add connector
-                row_str += symbol.rstrip() + "──"
+                row_str += symbol + "───"
             else:
-                row_str += symbol.rstrip()
+                row_str += symbol
 
-        row_str += f"   {row_idx}"
+        row_str += f"   {row_num}"
         lines.append(row_str)
 
         # Vertical connectors (except after last row)
@@ -131,17 +140,19 @@ def play_game_bot_first(game, mcts, random_player, num_simulations=1200):
         'move_number': 0,
         'player': None,
         'action': None,
-        'board': format_board_state(state, last_move=None),
+        'board': format_board_state(state),
         'visit_counts': None
     })
 
     while game.winner(state) is None:
         move_number += 1
         if player == 1:  # Bot's turn
-            node = Node(prior_prob=0, player=player, action_index=None)
-            node.set_state(state.copy())
+            # MCTS expects canonical form (current player's stones = 1)
+            mcts_state = state.copy()
+            node = Node(prior_prob=0, player=1, action_index=None)
+            node.set_state(mcts_state)
             root_node = mcts.run_simulation(
-                root_node=node, num_simulations=num_simulations, player=player, add_noise=False
+                root_node=node, num_simulations=num_simulations, player=1, add_noise=False
             )
             visit_counts = get_visit_counts(root_node)
             action, node, action_probs = mcts.select_move(node=root_node, mode="exploit", temperature=1)
@@ -152,7 +163,7 @@ def play_game_bot_first(game, mcts, random_player, num_simulations=1200):
                 'move_number': move_number,
                 'player': 'Bot (Black/○)',
                 'action': last_move,
-                'board': format_board_state(state, last_move=last_move if last_move != "pass" else None),
+                'board': format_board_state(state),
                 'visit_counts': visit_counts
             })
         else:  # Random player's turn
@@ -166,7 +177,7 @@ def play_game_bot_first(game, mcts, random_player, num_simulations=1200):
                 'move_number': move_number,
                 'player': 'Random (White/●)',
                 'action': last_move,
-                'board': format_board_state(state, last_move=last_move if last_move != "pass" else None),
+                'board': format_board_state(state),
                 'visit_counts': None
             })
 
@@ -197,17 +208,20 @@ def play_game_random_first(game, mcts, random_player, num_simulations=1200):
         'move_number': 0,
         'player': None,
         'action': None,
-        'board': format_board_state(state, last_move=None),
+        'board': format_board_state(state),
         'visit_counts': None
     })
 
     while game.winner(state) is None:
         move_number += 1
         if player == -1:  # Bot's turn
-            node = Node(prior_prob=0, player=player, action_index=None)
-            node.set_state(state.copy())
+            # MCTS expects canonical form (current player's stones = 1)
+            mcts_state = state.copy()
+            mcts_state[:NUM_POSITIONS] *= -1
+            node = Node(prior_prob=0, player=1, action_index=None)
+            node.set_state(mcts_state)
             root_node = mcts.run_simulation(
-                root_node=node, num_simulations=num_simulations, player=player, add_noise=False
+                root_node=node, num_simulations=num_simulations, player=1, add_noise=False
             )
             visit_counts = get_visit_counts(root_node)
             action, node, action_probs = mcts.select_move(node=root_node, mode="exploit", temperature=1)
@@ -218,7 +232,7 @@ def play_game_random_first(game, mcts, random_player, num_simulations=1200):
                 'move_number': move_number,
                 'player': 'Bot (White/●)',
                 'action': last_move,
-                'board': format_board_state(state, last_move=last_move if last_move != "pass" else None),
+                'board': format_board_state(state),
                 'visit_counts': visit_counts
             })
         else:  # Random player's turn
@@ -232,7 +246,7 @@ def play_game_random_first(game, mcts, random_player, num_simulations=1200):
                 'move_number': move_number,
                 'player': 'Random (Black/○)',
                 'action': last_move,
-                'board': format_board_state(state, last_move=last_move if last_move != "pass" else None),
+                'board': format_board_state(state),
                 'visit_counts': None
             })
 
@@ -342,7 +356,7 @@ def main():
     num_games = cfg.NUM_GAMES
     num_simulations = cfg.NUM_SIMULATIONS
 
-    print(f"\nTesting AlphaZero bot vs Random Player - 5x5 Go")
+    print(f"\nTesting AlphaZero bot vs Random Player")
     print(f"Total games: {num_games}")
     print(f"MCTS simulations per move: {num_simulations}")
     print("=" * 60)
@@ -427,7 +441,7 @@ def main():
     ax1.bar(outcome_counts.index, outcome_counts.values, color=outcome_colors)
     ax1.set_xlabel('Outcome')
     ax1.set_ylabel('Number of Games')
-    ax1.set_title('5x5 Go: Bot vs Random - Overall Results')
+    ax1.set_title('Bot vs Random - Overall Results')
 
     label_map = {'bot_win': 'Bot Win', 'draw': 'Draw', 'random_win': 'Random Win'}
     ax1.set_xticklabels([label_map.get(outcome, outcome) for outcome in outcome_counts.index])
@@ -492,13 +506,15 @@ def main():
                 if move_num == 0:
                     f.write("Initial Board State:\n")
                 else:
-                    f.write(f"Move {move_num}: {player} plays {action}\n")
+                    action_str = coords_to_go_notation(action) if action else action
+                    f.write(f"Move {move_num}: {player} plays {action_str}\n")
 
                 # Show visit counts for bot moves
                 if visit_counts is not None:
                     f.write("  MCTS Visit Counts (top moves):\n")
                     for i, (coords, visits) in enumerate(visit_counts[:10]):  # Show top 10
-                        f.write(f"    {coords}: {visits} visits\n")
+                        notation = coords_to_go_notation(coords)
+                        f.write(f"    {notation}: {visits} visits\n")
                     f.write("\n")
 
                 # Write the board (list of pre-formatted lines)
