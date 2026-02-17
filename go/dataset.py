@@ -4,38 +4,57 @@ import pickle
 from copy import copy
 from config import Config as cfg
 import random
+from game import board_to_canonical_3d
+from augmentation import augment_data, get_augmentations
 
 class GoDataset:
     def __init__(self, dataset, use_augmentation=False):
-        self.data = dataset
         self.use_augmentation = use_augmentation and cfg.USE_AUGMENTATION
         if self.use_augmentation:
-            from augmentation import get_augmentations
             self.augmentations = get_augmentations()
 
+        # Precompute all canonical board representations and targets
+        n = len(dataset)
+        # Store raw data for augmented samples
+        self.states_flat = [d[0] for d in dataset]
+        self.players = [d[2] for d in dataset]
+
+        # Precompute canonical 3D tensors for all samples
+        canonical_list = []
+        values = np.empty(n, dtype=np.float32)
+        policies = np.empty((n, len(dataset[0][1])), dtype=np.float32) if n > 0 else np.empty((0, 0), dtype=np.float32)
+
+        for i, datapoint in enumerate(dataset):
+            state_flat = datapoint[0]
+            player = datapoint[2]
+            values[i] = datapoint[3]
+            policies[i] = datapoint[1]
+            canonical_list.append(board_to_canonical_3d(state_flat, player))
+
+        if n > 0:
+            self.canonical = torch.from_numpy(np.stack(canonical_list))
+        else:
+            self.canonical = torch.empty(0)
+        self.values = torch.from_numpy(values)
+        self.policies = torch.from_numpy(policies)
+
     def __len__(self):
-        return len(self.data)
+        return self.values.shape[0]
 
     def __getitem__(self, index):
-        datapoint = self.data[index]
-        state_flat = datapoint[0]  # Game state (27 values: 25 board + ko + passes)
-        player = datapoint[2]      # Player (1 or -1)
-        v = datapoint[3]           # Value target
-        p = datapoint[1]           # Policy target (26 values: 25 positions + pass)
-
         # Apply data augmentation with 50% probability
         if self.use_augmentation and random.random() < 0.5:
-            from augmentation import augment_data
             transform_type = random.choice(self.augmentations)
-            state_flat, p = augment_data(state_flat, p, transform_type)
+            state_flat, p = augment_data(self.states_flat[index], self.policies[index].numpy(), transform_type)
+            state_canonical = board_to_canonical_3d(state_flat, self.players[index])
+            return (torch.from_numpy(state_canonical),
+                    self.values[index],
+                    torch.from_numpy(np.array(p, dtype=np.float32)))
 
-        # Convert flat state to canonical 3-plane representation
-        from game import board_to_canonical_3d
-        state_canonical = board_to_canonical_3d(state_flat, player)
-
-        return (torch.tensor(state_canonical, dtype=torch.float),
-                torch.tensor(v, dtype=torch.float),
-                torch.tensor(p, dtype=torch.float))
+        # Non-augmented: return precomputed tensors directly
+        return (self.canonical[index],
+                self.values[index],
+                self.policies[index])
 
 class TrainingDataset:
     def __init__(self):
