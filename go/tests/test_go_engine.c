@@ -311,6 +311,62 @@ static void test_ko_detection(void)
            "ko point should be invalid for white to play immediately");
 }
 
+static void test_no_ko_on_multi_liberty_capture(void)
+{
+    printf("\n[apply_move – single capture with multiple liberties is not ko]\n");
+
+    /*
+     * White at (0,0) has two neighbours: (0,1) and (1,0).
+     * Black at (1,0) fills the southern liberty.
+     * Black plays (0,1), capturing white at (0,0).
+     *
+     * After capture, black at (0,1) has 3 liberties: (0,0), (0,2), (1,1).
+     * Ko requires group_size == 1 AND liberties == 1; here liberties == 3,
+     * so ko_point must remain -1.
+     *
+     *   col: 0  1  2
+     *   row0: O  .  .    <- white, captured by black at (0,1)
+     *   row1: X  .  .    <- black, blocks white's south liberty
+     */
+    GoState s = go_initial_state();
+    s.board[rc(0,0)] = -1;   /* white */
+    s.board[rc(1,0)] =  1;   /* black — blocks white's south liberty */
+
+    GoState ns = go_apply_move(&s, rc(0,1), 1);   /* black captures */
+
+    EXPECT(ns.board[rc(0,0)] == 0,  "white stone captured");
+    EXPECT(ns.board[rc(0,1)] == 1,  "black stone placed");
+    EXPECT(ns.ko_point == -1,
+           "no ko: capturing stone has 3 liberties, not 1");
+}
+
+static void test_ko_cleared_after_pass_allows_play(void)
+{
+    printf("\n[ko – formerly forbidden cell is legal after pass]\n");
+
+    /* Reproduce the ko setup from test_ko_detection. */
+    GoState s = go_initial_state();
+    s.board[rc(0,0)] =  1;
+    s.board[rc(0,2)] =  1;
+    s.board[rc(0,1)] = -1;
+    s.board[rc(1,0)] = -1;
+    s.board[rc(1,2)] = -1;
+    s.board[rc(2,1)] = -1;
+
+    GoState after_capture = go_apply_move(&s, rc(1,1), 1);
+    EXPECT(after_capture.ko_point == rc(0,1), "ko set at (0,1)");
+    EXPECT(go_is_valid_move(&after_capture, rc(0,1), -1) == 0,
+           "white cannot recapture ko immediately");
+
+    /* Black passes — ko is cleared. */
+    GoState after_pass = go_apply_move(&after_capture, PASS_ACTION, 1);
+    EXPECT(after_pass.ko_point == -1, "pass clears ko_point");
+
+    /* White can now legally play the formerly-forbidden cell. */
+    EXPECT(go_is_valid_move(&after_pass, rc(0,1), -1) == 1,
+           "after pass, formerly ko'd cell is now legal for white");
+}
+
 static void test_valid_moves_on_empty_board(void)
 {
     printf("\n[valid moves – empty board]\n");
@@ -508,6 +564,8 @@ int main(void)
     test_is_suicide();
     test_suicide_that_captures();
     test_ko_detection();
+    test_no_ko_on_multi_liberty_capture();
+    test_ko_cleared_after_pass_allows_play();
     test_valid_moves_on_empty_board();
     test_occupied_square_invalid();
     test_apply_move_pass();
