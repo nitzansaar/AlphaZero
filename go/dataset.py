@@ -82,6 +82,41 @@ class TrainingDataset:
         self.training_dataset.extend(data)
         self.training_dataset = self.training_dataset[-1 * cfg.DATASET_QUEUE_SIZE:]
 
+    def load_from_npy(self, npy_dir):
+        """Load positions produced by selfplay_cpp from three .npy files.
+
+        Reads:
+          <npy_dir>/states.npy    (N, 3, 9, 9)  float32 canonical board planes
+          <npy_dir>/policies.npy  (N, 82)        float32 MCTS visit probabilities
+          <npy_dir>/values.npy    (N,)            float32 game outcome values
+
+        Each position is stored as [board_flat, action_probs, player=1, value]
+        where board_flat is an 81-element array with current-player stones = +1.
+        This is fully compatible with GoDataset and board_to_canonical_3d.
+        """
+        import os as _os
+        states   = np.load(_os.path.join(npy_dir, 'states.npy'))    # (N, 3, 9, 9)
+        policies = np.load(_os.path.join(npy_dir, 'policies.npy'))  # (N, 82)
+        values   = np.load(_os.path.join(npy_dir, 'values.npy'))    # (N,)
+
+        N = len(values)
+        print(f"Loaded {N} positions from {npy_dir}")
+
+        for i in range(N):
+            # Convert 3-plane canonical representation to flat 81-element board.
+            # plane 0 = current-player stones (+1), plane 1 = opponent stones (-1).
+            # board_to_canonical_3d(board_flat, player=1) will reconstruct
+            # identical 3 planes, so this is fully compatible with GoDataset.
+            board_flat = (states[i, 0] - states[i, 1]).flatten().astype(np.float32)
+            self.training_dataset.append([
+                board_flat,          # (81,) canonical board, current player = +1
+                policies[i],         # (82,) MCTS visit probabilities
+                1,                   # player = 1 (state is in canonical form)
+                float(values[i]),    # game outcome from this player's perspective
+            ])
+
+        self.training_dataset = self.training_dataset[-cfg.DATASET_QUEUE_SIZE:]
+
     def save(self, path):
         """Save the training dataset to a pickle file."""
         with open(path, 'wb') as handle:
