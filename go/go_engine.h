@@ -13,6 +13,10 @@
 
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* ── Board size (9x9 only) ────────────────────────────────────────────── */
 
 #define BOARD_SIZE    9
@@ -128,3 +132,7 @@ void go_board_to_planes(const GoState *state, int player, float *planes_out);
 
 /* Print the board to stdout. */
 void go_render(const GoState *state);
+
+#ifdef __cplusplus
+}
+#endif

@@ -63,10 +63,10 @@ int go_find_group(const int8_t *board, int idx,
 
     int8_t color = board[idx];
 
-    int8_t in_group[NUM_POSITIONS];
+    /* in_stack[] prevents any cell from being pushed more than once, so
+     * every popped cell is fresh — no secondary visited guard needed. */
     int8_t liberty_seen[NUM_POSITIONS];
     int8_t in_stack[NUM_POSITIONS];
-    memset(in_group,      0, NUM_POSITIONS);
     memset(liberty_seen,  0, NUM_POSITIONS);
     memset(in_stack,      0, NUM_POSITIONS);
 
@@ -80,9 +80,6 @@ int go_find_group(const int8_t *board, int idx,
 
     while (stack_top > 0) {
         int current = stack[--stack_top];
-
-        if (in_group[current]) continue;
-        in_group[current] = 1;
         group_out[group_size++] = current;
 
         int n = NEIGHBOR_COUNT[current];
