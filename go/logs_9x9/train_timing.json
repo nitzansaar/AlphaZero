@@ -1,42 +1,42 @@
 {
   "timings": {
-    "load_data": 3.5742,
-    "data_transfer": 2.2667,
-    "forward_pass": 44.8604,
-    "backward_pass": 135.2698,
-    "optimizer_step": 1283.948,
-    "model_save": 3.5542
+    "load_data": 2.9513,
+    "data_transfer": 7.6245,
+    "forward_pass": 96.3946,
+    "backward_pass": 301.4367,
+    "optimizer_step": 177.9793,
+    "model_save": 2.8483
   },
   "details": {
     "load_data": {
-      "total": 3.5742,
+      "total": 2.9513,
       "calls": 1,
-      "avg": 3.574221
+      "avg": 2.951326
     },
     "data_transfer": {
-      "total": 2.2667,
-      "calls": 97700,
-      "avg": 2.3e-05
+      "total": 7.6245,
+      "calls": 195300,
+      "avg": 3.9e-05
     },
     "forward_pass": {
-      "total": 44.8604,
-      "calls": 97700,
-      "avg": 0.000459
+      "total": 96.3946,
+      "calls": 195300,
+      "avg": 0.000494
     },
     "backward_pass": {
-      "total": 135.2698,
-      "calls": 97700,
-      "avg": 0.001385
+      "total": 301.4367,
+      "calls": 195300,
+      "avg": 0.001543
     },
     "optimizer_step": {
-      "total": 1283.948,
-      "calls": 97700,
-      "avg": 0.013142
+      "total": 177.9793,
+      "calls": 195300,
+      "avg": 0.000911
     },
     "model_save": {
-      "total": 3.5542,
-      "calls": 53,
-      "avg": 0.067061
+      "total": 2.8483,
+      "calls": 42,
+      "avg": 0.067817
     }
   }
 }
