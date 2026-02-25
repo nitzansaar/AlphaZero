@@ -98,7 +98,7 @@ class Config9x9:
     MOMENTUM = 0.9
 
     # MCTS settings
-    NUM_SIMULATIONS = 1600
+    NUM_SIMULATIONS = 800
     MCTS_UCB_C = 1.414
 
     # Network architecture - larger for 9x9
@@ -109,9 +109,16 @@ class Config9x9:
     # Dataset - larger buffer
     DATASET_QUEUE_SIZE = 500000
 
-    # Loss weights
+    # Loss weights — equal weighting; with Adam the ratio is irrelevant because
+    # Adam normalises out gradient scale (scale-invariant update rule).
+    # To actually bias Adam toward the policy head, we use a higher learning rate
+    # for policy head parameters in the optimizer (see train.py).
     VALUE_LOSS_WEIGHT = 1.0
     POLICY_LOSS_WEIGHT = 1.0
+
+    # Learning-rate multiplier for the policy head relative to backbone/value.
+    # Adam is scale-invariant w.r.t. loss weights, but not w.r.t. per-param-group LRs.
+    POLICY_LR_MULTIPLIER = 3.0
 
     # Temperature for exploration
     TEMP_THRESHOLD = 15  # More moves before deterministic
