@@ -6,9 +6,11 @@
 #include <cassert>
 #include <random>
 
-/* ── RNG (seeded deterministically for reproducibility) ──────────────── */
+/* ── RNG (thread-local so each worker thread gets an independent stream) ─ */
 
-static std::mt19937 s_rng(42);
+static thread_local std::mt19937 s_rng(42);
+
+void mcts_seed_rng(uint32_t seed) { s_rng.seed(seed); }
 
 /* ── Pool helpers ─────────────────────────────────────────────────────── */
 

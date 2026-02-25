@@ -34,7 +34,7 @@
 /* ── MCTS hyper-parameters ────────────────────────────────────────────── */
 
 constexpr float MCTS_C_PUCT = 1.414f;  /* exploration constant (sqrt(2)) */
-constexpr float DIR_ALPHA   = 0.03f;   /* Dirichlet concentration         */
+constexpr float DIR_ALPHA   = 0.03f * BOARD_SIZE;  /* Dirichlet concentration, scaled by board size (KataGo: 0.03*size) */
 constexpr float DIR_FRAC    = 0.25f;   /* noise mix-in fraction           */
 
 /* ── Node ─────────────────────────────────────────────────────────────── */
@@ -117,3 +117,10 @@ void mcts_simulate(NodePool *pool, NNEvalFn nn_fn,
 int mcts_select_move(const NodePool *pool,
                      float temperature,
                      float *action_probs_out);
+
+/*
+ * Re-seed the thread-local RNG used for Dirichlet noise and move sampling.
+ * Call once per worker thread before starting self-play (avoids all threads
+ * producing identical game sequences).
+ */
+void mcts_seed_rng(uint32_t seed);
