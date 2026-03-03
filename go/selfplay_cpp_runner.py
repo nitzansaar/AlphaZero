@@ -160,14 +160,15 @@ if __name__ == "__main__":
             cmd = [
                 SELFPLAY_BINARY,
                 ts_path,
-                "--games",      str(games),
-                "--sims",       str(cfg.NUM_SIMULATIONS),
-                "--batch",      "64",
-                "--threads",    "1",
-                "--output",     worker_dir,
-                "--temp-moves", str(cfg.TEMP_THRESHOLD),
-                "--max-moves",  "100",
-                "--seed",       str(i * 1000),
+                "--games",          str(games),
+                "--sims",           str(cfg.NUM_SIMULATIONS),
+                "--batch",          "64",
+                "--threads",        "1",
+                "--output",         worker_dir,
+                "--temp-moves",     str(cfg.TEMP_THRESHOLD),
+                "--max-moves",      "200",
+                "--min-pass-move",  str(cfg.MIN_PASS_MOVE),
+                "--seed",           str(i * 1000),
             ]
             if USE_CUDA:
                 cmd.append("--cuda")
