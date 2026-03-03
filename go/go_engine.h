@@ -123,10 +123,14 @@ int go_get_winner(const GoState *state, int perspective);
  * planes_out must hold 3 * NUM_POSITIONS floats, laid out as:
  *   [0 .. NUM_POSITIONS-1]        plane 0: current-player stones
  *   [NUM_POSITIONS .. 2N-1]       plane 1: opponent stones
- *   [2*NUM_POSITIONS .. 3N-1]     plane 2: empty squares
- * Mirrors game.py::board_to_canonical_3d.
+ *   [2*NUM_POSITIONS .. 3N-1]     plane 2: color-to-play
+ *                                           1.0 if absolute_player == +1 (Black)
+ *                                           0.0 if absolute_player == -1 (White)
+ * player:          canonical perspective (pass 1 for canonical-form states)
+ * absolute_player: +1 = Black to move, -1 = White to move
  */
-void go_board_to_planes(const GoState *state, int player, float *planes_out);
+void go_board_to_planes(const GoState *state, int player, int absolute_player,
+                        float *planes_out);
 
 /* ── Debug ────────────────────────────────────────────────────────────── */
 

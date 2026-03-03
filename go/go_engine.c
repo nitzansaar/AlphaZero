@@ -339,7 +339,8 @@ int go_get_winner(const GoState *state, int perspective)
 
 /* ── Neural-network input planes ─────────────────────────────────────── */
 
-void go_board_to_planes(const GoState *state, int player, float *planes_out)
+void go_board_to_planes(const GoState *state, int player, int absolute_player,
+                        float *planes_out)
 {
     float *plane0 = planes_out;
     float *plane1 = planes_out + NUM_POSITIONS;
@@ -349,8 +350,10 @@ void go_board_to_planes(const GoState *state, int player, float *planes_out)
         int canonical = (int)state->board[i] * player;
         plane0[i] = (canonical ==  1) ? 1.0f : 0.0f;
         plane1[i] = (canonical == -1) ? 1.0f : 0.0f;
-        plane2[i] = (canonical ==  0) ? 1.0f : 0.0f;
     }
+    float color_val = (absolute_player == 1) ? 1.0f : 0.0f;
+    for (int i = 0; i < NUM_POSITIONS; i++)
+        plane2[i] = color_val;
 }
 
 /* ── Debug render ─────────────────────────────────────────────────────── */
