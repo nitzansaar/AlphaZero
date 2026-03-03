@@ -103,15 +103,17 @@ class TrainingDataset:
         print(f"Loaded {N} positions from {npy_dir}")
 
         for i in range(N):
-            # Convert 3-plane canonical representation to flat 81-element board.
-            # plane 0 = current-player stones (+1), plane 1 = opponent stones (-1).
-            # board_to_canonical_3d(board_flat, player=1) will reconstruct
-            # identical 3 planes, so this is fully compatible with GoDataset.
-            board_flat = (states[i, 0] - states[i, 1]).flatten().astype(np.float32)
+            # Recover absolute color from the color-to-play plane (plane 2).
+            color = 1 if states[i, 2, 0, 0] > 0.5 else -1
+            # Convert canonical planes to absolute board form.
+            # plane 0 = current-player stones (+1), plane 1 = opponent (-1).
+            # Multiplying by color converts canonical → absolute (Black=+1, White=-1).
+            canonical_board = (states[i, 0] - states[i, 1]).flatten().astype(np.float32)
+            absolute_board = canonical_board * color
             self.training_dataset.append([
-                board_flat,          # (81,) canonical board, current player = +1
+                absolute_board,      # (81,) absolute board (Black=+1, White=-1)
                 policies[i],         # (82,) MCTS visit probabilities
-                1,                   # player = 1 (state is in canonical form)
+                color,               # absolute player who moved (+1 or -1)
                 float(values[i]),    # game outcome from this player's perspective
             ])
 
