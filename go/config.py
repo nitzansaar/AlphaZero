@@ -35,11 +35,13 @@ class Config5x5:
 
     # Training settings
     BATCH_SIZE = 512
-    EPOCHS = 50
+    TRAIN_STEPS = 15
     SELFPLAY_GAMES = 500
     LEARNING_RATE = 0.0002
     WEIGHT_DECAY = 1e-4
     MOMENTUM = 0.9
+    LR_DECAY_ITERS = [100, 150]
+    LR_DECAY_FACTOR = 0.1
 
     # MCTS settings
     NUM_SIMULATIONS = 1600
@@ -60,6 +62,9 @@ class Config5x5:
     # Temperature for exploration
     TEMP_THRESHOLD = 6
     INITIAL_TEMP = 1.0
+
+    # Minimum move number before pass is allowed in C++ selfplay.
+    MIN_PASS_MOVE = 15
 
     # Data augmentation
     USE_AUGMENTATION = True
@@ -86,16 +91,18 @@ class Config9x9:
     PASS_ACTION = 81
     ACTION_SIZE = 82  # 81 positions + 1 pass
 
-    # Komi (standard for 9x9)
-    KOMI = 5.5
+    # Komi 
+    KOMI = 6
 
     # Training settings - increased for larger board
-    BATCH_SIZE = 256  # Smaller batches, more updates
-    EPOCHS = 100  # More epochs for convergence
+    BATCH_SIZE = 512
+    TRAIN_STEPS = 1500  
     SELFPLAY_GAMES = 1000  # More games for diversity
-    LEARNING_RATE = 0.001  # Start higher, will decay
+    LEARNING_RATE = 0.001  # SGD LR
     WEIGHT_DECAY = 1e-4
     MOMENTUM = 0.9
+    LR_DECAY_ITERS = [100, 150]
+    LR_DECAY_FACTOR = 0.1
 
     # MCTS settings
     NUM_SIMULATIONS = 800
@@ -121,8 +128,12 @@ class Config9x9:
     POLICY_LR_MULTIPLIER = 3.0
 
     # Temperature for exploration
-    TEMP_THRESHOLD = 15  # More moves before deterministic
+    TEMP_THRESHOLD = 30  # More moves before deterministic (~33% of ~90-move game)
     INITIAL_TEMP = 1.0
+
+    # Minimum move number before pass is allowed in C++ selfplay.
+    # Prevents komi exploitation (model learning to pass immediately as White).
+    MIN_PASS_MOVE = 30
 
     # Data augmentation
     USE_AUGMENTATION = True
@@ -184,7 +195,7 @@ def print_config():
     print(f"")
     print(f"Training:")
     print(f"  Batch Size: {Config.BATCH_SIZE}")
-    print(f"  Epochs: {Config.EPOCHS}")
+    print(f"  Train Steps: {Config.TRAIN_STEPS}")
     print(f"  Self-play Games: {Config.SELFPLAY_GAMES}")
     print(f"  Learning Rate: {Config.LEARNING_RATE}")
     print(f"")
