@@ -275,7 +275,7 @@ void mcts_simulate(NodePool *pool, NNEvalFn nn_fn,
     /* ── Step 1: expand root ──────────────────────────────────────────── */
     if (!go_game_ended(&root->state)) {
         float planes[3 * NUM_POSITIONS];
-        go_board_to_planes(&root->state, 1, planes);
+        go_board_to_planes(&root->state, 1, root->player, planes);
 
         float root_value;
         float root_policy[ACTION_SIZE];
@@ -343,7 +343,7 @@ void mcts_simulate(NodePool *pool, NNEvalFn nn_fn,
             Node *leaf = &pool->nodes[unique_idx[j]];
             if (!leaf->state_set) continue;
 
-            go_board_to_planes(&leaf->state, 1,
+            go_board_to_planes(&leaf->state, 1, leaf->player,
                                batch_planes + nn_batch * 3 * NUM_POSITIONS);
             unique_eval_idx[j] = nn_batch;
             unique_has_eval[j] = 1;
