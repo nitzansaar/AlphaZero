@@ -109,7 +109,7 @@ class Trainer:
             shuffle=True,
             num_workers=8,  # Parallel data loading
             pin_memory=True,  # Faster data transfer to GPU
-            persistent_workers=True  # Keep workers alive between epochs
+            persistent_workers=False
         )
 
         # AlphaGo Zero uses MSE for value and cross-entropy for policy
@@ -126,96 +126,96 @@ class Trainer:
 
         policy_criterion = policy_loss_fn
 
-        # Use Adam optimizer with weight decay (L2 regularization) like AlphaGo Zero
-        optimizer = torch.optim.Adam(
-            self.model.parameters(),
-            lr=cfg.LEARNING_RATE,
-            weight_decay=cfg.WEIGHT_DECAY
-        )
+        # Compute LR for this iteration using step-decay schedule
+        current_iter = self.latest_file_number + 1
+        lr = cfg.LEARNING_RATE
+        for decay_iter in cfg.LR_DECAY_ITERS:
+            if current_iter >= decay_iter:
+                lr *= cfg.LR_DECAY_FACTOR
+        print(f"Iteration {current_iter}: using LR={lr:.2e}")
 
-        # Learning rate schedule: decay by factor of 0.1 at specific epochs
-        # AlphaGo Zero uses step decay, but we'll use ReduceLROnPlateau for adaptive learning
-        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer,
-            mode='min',
-            factor=0.5,
-            patience=10,  # Increased patience
-            threshold=0.0001,
-            threshold_mode='rel',
-            cooldown=5,
-            min_lr=1e-6,  # Minimum learning rate
-            eps=1e-08
+        # Policy head gets a higher LR (POLICY_LR_MULTIPLIER) to accelerate
+        # policy learning, which lags behind value learning in self-play.
+        policy_modules = [
+            self.original_model.policy_conv,
+            self.original_model.policy_bn,
+            self.original_model.policy_fc,
+        ]
+        policy_params = []
+        for m in policy_modules:
+            policy_params.extend(m.parameters())
+        policy_param_ids = {id(p) for p in policy_params}
+        backbone_params = [p for p in self.original_model.parameters()
+                           if id(p) not in policy_param_ids]
+
+        policy_lr = lr * cfg.POLICY_LR_MULTIPLIER
+        print(f"  Backbone/value LR: {lr:.2e}  |  Policy head LR: {policy_lr:.2e}")
+
+        optimizer = torch.optim.SGD(
+            [
+                {'params': backbone_params},
+                {'params': policy_params, 'lr': policy_lr},
+            ],
+            lr=lr,
+            momentum=cfg.MOMENTUM,
+            weight_decay=cfg.WEIGHT_DECAY,
+            nesterov=True,
         )
 
         # Mixed precision training for RTX 5090 (faster training, less memory)
         scaler = GradScaler('cuda')
 
-        best_loss = 1000
         history = []
 
-        for epoch in range(cfg.EPOCHS):
-            self.model.train()
-            train_loss = 0
-            train_vloss = 0
-            train_aloss = 0
+        self.model.train()
+        data_iter = iter(train_dataloader)
+        for step in range(cfg.TRAIN_STEPS):
+            try:
+                X, v, p = next(data_iter)
+            except StopIteration:
+                data_iter = iter(train_dataloader)
+                X, v, p = next(data_iter)
 
-            for i, (X, v, p) in enumerate(train_dataloader): # iterate through the batch
-                with timer.track("data_transfer"):
-                    X = X.to(device, non_blocking=True) # board state
-                    v = v.to(device, non_blocking=True) # value target
-                    p = p.to(device, non_blocking=True) # policy target
+            with timer.track("data_transfer"):
+                X = X.to(device, non_blocking=True)
+                v = v.to(device, non_blocking=True)
+                p = p.to(device, non_blocking=True)
 
-                with timer.track("forward_pass"):
-                    with autocast('cuda'):
-                        yv, yp = self.model(X)
+            with timer.track("forward_pass"):
+                with autocast('cuda'):
+                    yv, yp = self.model(X)
+                    vloss = value_criterion(yv.squeeze(-1), v)
+                    aloss = policy_criterion(yp, p)
+                    loss = vloss + aloss
 
-                        vloss = value_criterion(yv.squeeze(-1), v) # value loss
-                        aloss = policy_criterion(yp, p) # policy loss
-                        loss = vloss + aloss
+            with timer.track("backward_pass"):
+                optimizer.zero_grad(set_to_none=True)
+                scaler.scale(loss).backward()
 
-                train_loss += loss.item() # accumulate the loss
-                train_vloss += vloss.item()
-                train_aloss += aloss.item()
+            with timer.track("optimizer_step"):
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                scaler.step(optimizer)
+                scaler.update()
 
-                with timer.track("backward_pass"):
-                    optimizer.zero_grad(set_to_none=True)
-                    scaler.scale(loss).backward()
+            train_loss = loss.item()
+            print(f"Step {step}: Total Loss: {train_loss:.6f}; Value Loss: {vloss.item():.6f}; Policy Loss: {aloss.item():.6f}")
+            history.append([step, train_loss, vloss.item(), aloss.item()])
 
-                with timer.track("optimizer_step"):
-                    scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-                    scaler.step(optimizer)
-                    scaler.update()
-
-            train_loss = train_loss / len(train_dataloader)
-            train_vloss = train_vloss / len(train_dataloader)
-            train_aloss = train_aloss / len(train_dataloader)
-
-            # Save model based on training loss
-            lr_scheduler.step(train_loss)
-            current_lr = optimizer.param_groups[0]['lr']
-
-            # save the model based on the training loss
-            if train_loss < best_loss:
-                best_loss = train_loss
-                current_iteration = self.latest_file_number + 1
-                savepath = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(current_iteration))
-                with timer.track("model_save"):
-                    torch.save(self.original_model.state_dict(), savepath)
-                print("Saving Model.....BL", savepath)
-                # Store iteration number for evaluation script
-                self.current_iteration = current_iteration
-
-            print(f"Epoch {epoch}:: Total Loss: {train_loss:.6f}; Value Loss: {train_vloss:.6f}; Policy Loss: {train_aloss:.6f}; LR: {current_lr:.2e}")
-
-            history.append([epoch, train_loss, train_vloss, train_aloss])
+        # Always save the model after completing all steps
+        current_iteration = self.latest_file_number + 1
+        savepath = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(current_iteration))
+        with timer.track("model_save"):
+            torch.save(self.original_model.state_dict(), savepath)
+        print(f"Saved model: {savepath}")
+        self.current_iteration = current_iteration
 
         timer.print_summary("Training Timing")
         timing_path = os.path.join(cfg.LOGDIR, "train_timing.json")
         timer.save(timing_path)
         print(f"Timing data saved to {timing_path}")
 
-        history = pd.DataFrame(history,columns=["Epoch","Tr_Loss","Value_Loss","Policy_Loss"])
+        history = pd.DataFrame(history, columns=["Step", "Tr_Loss", "Value_Loss", "Policy_Loss"])
         current_iteration = self.latest_file_number + 1
         logpath = os.path.join(cfg.LOGDIR, "{}_history.csv".format(current_iteration))
         history.to_csv(logpath, index=None)
