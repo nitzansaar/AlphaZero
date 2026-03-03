@@ -130,6 +130,22 @@ def main():
 
     start_time = time.time()
 
+    # Bootstrap: create the initial random-weight model if no checkpoint exists.
+    # selfplay_cpp_runner.py needs a model on disk before it can generate data.
+    from glob import glob
+    from config import Config as cfg
+    model_files = [f for f in glob(os.path.join(cfg.SAVE_MODEL_PATH, "*.pt"))
+                   if not f.endswith("_ts.pt")]
+    if not model_files:
+        print("\n[Bootstrap] No model found — creating initial random-weight model...")
+        import torch
+        from model import NeuralNetwork
+        os.makedirs(cfg.SAVE_MODEL_PATH, exist_ok=True)
+        init_model = NeuralNetwork()
+        init_path = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(0))
+        torch.save(init_model.state_dict(), init_path)
+        print(f"[Bootstrap] Saved: {init_path}\n")
+
     for i in range(args.iterations):
         iter_start = time.time()
         print(f"\n{'#'*60}")
@@ -137,13 +153,13 @@ def main():
         print(f"{'#'*60}")
 
         # Self-play (C++ binary)
-        if not run_command("python selfplay_cpp_runner.py",
+        if not run_command(f"{sys.executable} selfplay_cpp_runner.py",
                            "Self-play: Generating training data (C++)"):
             print("ERROR: C++ self-play failed!")
             return 1
 
         # Training (unchanged)
-        if not run_command("python train.py",
+        if not run_command(f"{sys.executable} train.py",
                            "Training: Updating neural network"):
             print("ERROR: Training failed!")
             return 1
