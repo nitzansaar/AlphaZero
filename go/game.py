@@ -14,7 +14,7 @@ def board_to_canonical_3d(board_flat, player):
         3-plane numpy array of shape (3, BOARD_SIZE, BOARD_SIZE):
         - Plane 0: Current player positions
         - Plane 1: Opponent positions
-        - Plane 2: Empty positions
+        - Plane 2: Color-to-play (1.0 if player == 1 / Black, 0.0 if player == -1 / White)
     """
     board_2d = np.array(board_flat[:NUM_POSITIONS]).reshape(BOARD_SIZE, BOARD_SIZE) # reshape the board to 5x5
     canonical = board_2d * player # transform the board to the current player's perspective
@@ -22,7 +22,8 @@ def board_to_canonical_3d(board_flat, player):
     planes = np.zeros((3, BOARD_SIZE, BOARD_SIZE), dtype=np.float32)
     planes[0] = (canonical == 1).astype(np.float32)   # current player
     planes[1] = (canonical == -1).astype(np.float32)  # opponent
-    planes[2] = (canonical == 0).astype(np.float32)   # empty
+    planes[2] = np.full((BOARD_SIZE, BOARD_SIZE),
+                        1.0 if player == 1 else 0.0, dtype=np.float32)  # color-to-play
 
     return planes
 
