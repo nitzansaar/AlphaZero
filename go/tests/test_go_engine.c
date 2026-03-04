@@ -507,8 +507,8 @@ static void test_board_to_planes(void)
 
     float planes[3 * NUM_POSITIONS];
 
-    /* From black's perspective (player=1). */
-    go_board_to_planes(&s, 1, planes);
+    /* From black's perspective (player=1, absolute_player=1). */
+    go_board_to_planes(&s, 1, 1, planes);
 
     float *p0 = planes;
     float *p1 = planes + NUM_POSITIONS;
@@ -518,15 +518,16 @@ static void test_board_to_planes(void)
     EXPECT(p0[white_pos] == 0.0f,   "plane0: white stone not current player");
     EXPECT(p1[white_pos] == 1.0f,   "plane1: white stone as opponent");
     EXPECT(p1[black_pos] == 0.0f,   "plane1: black stone not opponent");
-    EXPECT(p2[rc(0,0)]   == 1.0f,   "plane2: empty cell");
-    EXPECT(p2[black_pos] == 0.0f,   "plane2: occupied cell not empty");
+    EXPECT(p2[rc(0,0)]   == 1.0f,   "plane2: color-to-play=1 (Black to move)");
+    EXPECT(p2[black_pos] == 1.0f,   "plane2: color-to-play=1 everywhere");
 
-    /* From white's perspective (player=-1). */
-    go_board_to_planes(&s, -1, planes);
+    /* From white's perspective (player=-1, absolute_player=-1). */
+    go_board_to_planes(&s, -1, -1, planes);
     p0 = planes; p1 = planes + NUM_POSITIONS; p2 = planes + 2*NUM_POSITIONS;
 
     EXPECT(p0[white_pos] == 1.0f,   "plane0: white stone as current player");
     EXPECT(p1[black_pos] == 1.0f,   "plane1: black stone as opponent (from white's view)");
+    EXPECT(p2[rc(0,0)]   == 0.0f,   "plane2: color-to-play=0 (White to move)");
 }
 
 static void test_full_game_sequence(void)
