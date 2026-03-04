@@ -19,7 +19,7 @@ MCTS_CPP = mcts.cpp
 NN_CPP   = nn_inference.cpp
 NPY_C    = npy_writer.c
 
-BINARIES = test_go_engine test_mcts test_nn selfplay_cpp eval_cpp
+BINARIES = test_go_engine test_mcts test_nn selfplay_cpp
 
 .PHONY: all tests clean
 
