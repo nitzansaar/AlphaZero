@@ -1,0 +1,39 @@
+{
+  "meta": {
+    "board_size": 9,
+    "games_per_matchup": 20,
+    "simulations": 200
+  },
+  "matchups": {
+    "30_vs_170": {
+      "iter_a": 30,
+      "iter_b": 170,
+      "wins_a": 16,
+      "wins_b": 4,
+      "draws": 0,
+      "games": 20,
+      "simulations": 200,
+      "date": "2026-03-01T13:09:03"
+    },
+    "30_vs_198": {
+      "iter_a": 30,
+      "iter_b": 198,
+      "wins_a": 17,
+      "wins_b": 3,
+      "draws": 0,
+      "games": 20,
+      "simulations": 200,
+      "date": "2026-03-01T13:13:44"
+    },
+    "170_vs_198": {
+      "iter_a": 170,
+      "iter_b": 198,
+      "wins_a": 9,
+      "wins_b": 11,
+      "draws": 0,
+      "games": 20,
+      "simulations": 200,
+      "date": "2026-03-01T13:16:57"
+    }
+  }
+}

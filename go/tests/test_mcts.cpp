@@ -58,6 +58,18 @@ static void nn_always_win(const float *, int batch_size,
     }
 }
 
+/* Directs 100 % of policy mass to PASS; value = 0. */
+static void nn_pass_only(const float *, int batch_size,
+                         float *values, float *policies)
+{
+    for (int b = 0; b < batch_size; b++) {
+        values[b] = 0.0f;
+        for (int a = 0; a < ACTION_SIZE; a++)
+            policies[b * ACTION_SIZE + a] = 0.0f;
+        policies[b * ACTION_SIZE + PASS_ACTION] = 1.0f;
+    }
+}
+
 /* ── Shared pool — static to avoid stack overflow (~44 MB) ───────────── */
 
 static NodePool s_pool;
@@ -338,6 +350,127 @@ static void test_valid_actions_only()
            "all root children should be valid moves");
 }
 
+/*
+ * test_known_game_backup
+ *
+ * Goal: verify, with a fully-deterministic 1-step game, that
+ *   (a) go_get_winner returns the correct winner from the leaf's own
+ *       canonical perspective (perspective == leaf->player == -1), and
+ *   (b) backup propagates the right sign to every node along the path.
+ *
+ * Setup
+ * -----
+ * A full 9×9 board (no empty squares, no territory ambiguity) with
+ * consecutive_passes == 1.  nn_pass_only gives all policy mass to PASS,
+ * so the only child created at root is child[PASS_ACTION] and the single
+ * simulation follows the unique path:
+ *
+ *   root (player=+1, Black canonical)
+ *     └─ child (player=-1, White canonical, terminal: consecutive_passes=2)
+ *
+ * Canonical form & go_get_winner
+ * --------------------------------
+ * go_next_state_canonical(root, PASS) flips the board: Black's +1 stones
+ * become -1 (opponent from White's view) and White's -1 stones become +1
+ * (current player from White's view).
+ *
+ * go_get_winner(&child->state, child->player) with perspective=-1 negates
+ * the board again, recovering absolute form (Black=+1, White=-1) before
+ * Chinese-rules area scoring.
+ *
+ * Expected backup values (terminal game, backup formula: v = (winner == node->player) ? +1 : -1)
+ *
+ *   Part A – Black wins (71 Black, 10 White stones):
+ *     go_get_winner = +1  →  root.total_value = +1,  child.total_value = -1
+ *
+ *   Part B – White wins (5 Black, 76 White stones):
+ *     go_get_winner = -1  →  root.total_value = -1,  child.total_value = +1
+ */
+static void test_known_game_backup()
+{
+    printf("\n[known game: go_get_winner from leaf + backup propagation]\n");
+
+    /* ── Part A: Black wins (71 Black, 10 White, full board) ─────────── */
+    {
+        GoState s = go_initial_state();
+        for (int i =  0; i < 71; i++) s.board[i] =  1;   /* Black canonical */
+        for (int i = 71; i < NUM_POSITIONS; i++) s.board[i] = -1; /* White */
+        s.consecutive_passes = 1;   /* one more pass ends the game */
+
+        mcts_init_root(&s_pool, &s, 1);
+        mcts_simulate(&s_pool, nn_pass_only, 1, 1, false);
+
+        int ci = s_pool.nodes[0].children[PASS_ACTION];
+        EXPECT(ci >= 0, "[A] PASS child must be created");
+
+        if (ci >= 0) {
+            const Node *root  = &s_pool.nodes[0];
+            const Node *child = &s_pool.nodes[ci];
+
+            EXPECT(child->state_set,
+                   "[A] child state must be computed by mcts_simulate");
+            EXPECT(go_game_ended(&child->state),
+                   "[A] child state must be terminal (2 consecutive passes)");
+
+            /* go_get_winner with perspective == leaf->player (-1): canonical
+             * White form.  The function negates the board to absolute form and
+             * scores.  Black has 71 stones vs White's 10 + 5.5 komi. */
+            int winner = go_get_winner(&child->state, child->player);
+            EXPECT(winner == 1,
+                   "[A] go_get_winner(leaf, -1) == 1  (Black wins)");
+
+            /* backup: v = (winner==node->player) ? +1 : -1
+             *   root  player=+1, winner=+1  →  v = +1
+             *   child player=-1, winner=+1  →  v = -1                 */
+            EXPECT(root->visits  == 1, "[A] root visits == 1");
+            EXPECT(child->visits == 1, "[A] child visits == 1");
+            EXPECT(fabsf(root->total_value  - (+1.0f)) < 1e-6f,
+                   "[A] root total_value == +1  (Black's move, Black wins)");
+            EXPECT(fabsf(child->total_value - (-1.0f)) < 1e-6f,
+                   "[A] child total_value == -1  (White's move, Black wins)");
+        }
+    }
+
+    /* ── Part B: White wins (5 Black, 76 White, full board) ─────────── */
+    {
+        GoState s = go_initial_state();
+        for (int i =  0; i <  5; i++) s.board[i] =  1;   /* Black canonical */
+        for (int i =  5; i < NUM_POSITIONS; i++) s.board[i] = -1; /* White */
+        s.consecutive_passes = 1;
+
+        mcts_init_root(&s_pool, &s, 1);
+        mcts_simulate(&s_pool, nn_pass_only, 1, 1, false);
+
+        int ci = s_pool.nodes[0].children[PASS_ACTION];
+        EXPECT(ci >= 0, "[B] PASS child must be created");
+
+        if (ci >= 0) {
+            const Node *root  = &s_pool.nodes[0];
+            const Node *child = &s_pool.nodes[ci];
+
+            EXPECT(child->state_set,
+                   "[B] child state must be computed by mcts_simulate");
+            EXPECT(go_game_ended(&child->state),
+                   "[B] child state must be terminal");
+
+            /* Black has 5 stones vs White's 76 + 5.5 komi → White wins. */
+            int winner = go_get_winner(&child->state, child->player);
+            EXPECT(winner == -1,
+                   "[B] go_get_winner(leaf, -1) == -1  (White wins)");
+
+            /* backup: v = (winner==node->player) ? +1 : -1
+             *   root  player=+1, winner=-1  →  v = -1
+             *   child player=-1, winner=-1  →  v = +1                 */
+            EXPECT(root->visits  == 1, "[B] root visits == 1");
+            EXPECT(child->visits == 1, "[B] child visits == 1");
+            EXPECT(fabsf(root->total_value  - (-1.0f)) < 1e-6f,
+                   "[B] root total_value == -1  (Black's move, White wins)");
+            EXPECT(fabsf(child->total_value - (+1.0f)) < 1e-6f,
+                   "[B] child total_value == +1  (White's move, White wins)");
+        }
+    }
+}
+
 static void test_player_alternates_down_tree()
 {
     printf("\n[player alternates down the tree]\n");
@@ -393,6 +526,7 @@ int main()
     test_dirichlet_noise_changes_priors();
     test_valid_actions_only();
     test_player_alternates_down_tree();
+    test_known_game_backup();
 
     print_summary();
     return (tests_failed > 0) ? 1 : 0;
