@@ -50,7 +50,25 @@ USE_CUDA = torch.cuda.is_available()
 # ── Helper functions ──────────────────────────────────────────────────────
 
 def get_latest_model_path():
-    """Return the path of the latest state-dict checkpoint, or None."""
+    """Return the path of the gated best model checkpoint, or None.
+
+    If current_best_iter.txt exists in SAVE_MODEL_PATH, uses that iteration
+    (ensures selfplay always generates data from the last model that passed
+    evaluation gating).  Falls back to the highest-numbered model otherwise.
+    """
+    best_iter_file = os.path.join(cfg.SAVE_MODEL_PATH, "current_best_iter.txt")
+    if os.path.exists(best_iter_file):
+        try:
+            with open(best_iter_file) as f:
+                best_iter = int(f.read().strip())
+            path = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(best_iter))
+            if os.path.exists(path):
+                print(f"[Selfplay] Using gated best model: iter_{best_iter} ({path})")
+                return path
+        except (ValueError, FileNotFoundError):
+            pass
+
+    # Fall back to highest-numbered model (no gate file or it was stale)
     all_models = glob(os.path.join(cfg.SAVE_MODEL_PATH, "*.pt"))
     # Exclude TorchScript exports (_ts.pt).
     all_models = [m for m in all_models if not m.endswith("_ts.pt")]

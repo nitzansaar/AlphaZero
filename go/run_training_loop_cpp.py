@@ -109,6 +109,97 @@ def run_command(cmd, description):
     return result.returncode == 0
 
 
+# ── Model Gating ──────────────────────────────────────────────────────────
+
+def _read_best_iter(model_dir):
+    """Read current_best_iter.txt; return -1 if absent or unreadable."""
+    path = os.path.join(model_dir, "current_best_iter.txt")
+    try:
+        with open(path) as f:
+            return int(f.read().strip())
+    except (FileNotFoundError, ValueError):
+        return -1
+
+
+def _write_best_iter(model_dir, iteration):
+    """Write iteration to current_best_iter.txt in model_dir."""
+    path = os.path.join(model_dir, "current_best_iter.txt")
+    with open(path, "w") as f:
+        f.write(str(iteration))
+
+
+def _read_new_iter(logdir):
+    """Read the iteration number that train.py just saved (current_iteration.txt)."""
+    path = os.path.join(logdir, "current_iteration.txt")
+    try:
+        with open(path) as f:
+            return int(f.read().strip())
+    except (FileNotFoundError, ValueError):
+        return -1
+
+
+def gate_model(new_iter, prev_best_iter):
+    """
+    Evaluate new model (new_iter) against previous best (prev_best_iter).
+
+    Plays cfg.GATE_GAMES games with cfg.GATE_SIMULATIONS MCTS sims per move
+    (greedy, no random opening moves).  Returns True if the new model wins
+    >= cfg.GATE_WIN_RATE fraction of games.
+
+    Auto-passes when there is no previous model to compare against.
+    """
+    import torch
+    from config import Config as cfg
+    from game import Go
+    from value_policy_function import ValuePolicyNetwork
+    from test_model_vs_model import run_matchup
+
+    if prev_best_iter < 0:
+        print("[Gate] No previous model; auto-passing gate.")
+        return True
+
+    model_dir = cfg.SAVE_MODEL_PATH
+    new_path = os.path.join(model_dir, cfg.BEST_MODEL.format(new_iter))
+    old_path = os.path.join(model_dir, cfg.BEST_MODEL.format(prev_best_iter))
+
+    if not os.path.exists(old_path):
+        print(f"[Gate] Previous model not found ({old_path}); auto-passing.")
+        return True
+    if not os.path.exists(new_path):
+        print(f"[Gate] New model not found ({new_path}); failing gate.")
+        return False
+
+    print(f"\n[Gate] Evaluating iter_{new_iter} vs iter_{prev_best_iter} "
+          f"({cfg.GATE_GAMES} games, {cfg.GATE_SIMULATIONS} sims/move)")
+
+    vpn_new = ValuePolicyNetwork(new_path, use_compile=False)
+    vpn_old = ValuePolicyNetwork(old_path, use_compile=False)
+    game = Go()
+
+    result = run_matchup(
+        game, vpn_new, vpn_old,
+        num_games=cfg.GATE_GAMES,
+        num_simulations1=cfg.GATE_SIMULATIONS,
+        num_simulations2=cfg.GATE_SIMULATIONS,
+        label1=f"iter_{new_iter}",
+        label2=f"iter_{prev_best_iter}",
+        temperature_moves=cfg.GATE_TEMPERATURE_MOVES,
+    )
+
+    wins_new = result["wins1"]
+    win_rate = wins_new / cfg.GATE_GAMES
+    passes = win_rate >= cfg.GATE_WIN_RATE
+    status = "PASS" if passes else "FAIL"
+    print(f"[Gate] {status}: iter_{new_iter} win rate = {win_rate:.0%} "
+          f"(threshold {cfg.GATE_WIN_RATE:.0%}; {wins_new}/{cfg.GATE_GAMES} wins)")
+
+    del vpn_new, vpn_old, game
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    return passes
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='Run training loop (C++ selfplay)')
@@ -116,6 +207,8 @@ def main():
                         help='Number of training iterations')
     parser.add_argument('--eval-every', type=int, default=0,
                         help='Run evaluation every N iterations (0 = never)')
+    parser.add_argument('--no-gate', action='store_true',
+                        help='Disable model gating (always use latest model for selfplay)')
     args = parser.parse_args()
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -126,6 +219,7 @@ def main():
     print("=" * 60)
     print(f"Iterations: {args.iterations}")
     print(f"Evaluate every: {args.eval_every if args.eval_every > 0 else 'Never'}")
+    print(f"Model gating:   {'disabled (--no-gate)' if args.no_gate else 'enabled'}")
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     start_time = time.time()
@@ -163,6 +257,23 @@ def main():
                            "Training: Updating neural network"):
             print("ERROR: Training failed!")
             return 1
+
+        # Model gating: only promote new model to selfplay if it beats the current best
+        if not args.no_gate:
+            from config import Config as cfg
+            new_iter = _read_new_iter(cfg.LOGDIR)
+            prev_best = _read_best_iter(cfg.SAVE_MODEL_PATH)
+            if new_iter < 0:
+                print("[Gate] Could not determine new iteration number; skipping gate.")
+            elif new_iter == prev_best:
+                # First iteration or same number (shouldn't happen normally)
+                _write_best_iter(cfg.SAVE_MODEL_PATH, new_iter)
+            elif gate_model(new_iter, prev_best):
+                _write_best_iter(cfg.SAVE_MODEL_PATH, new_iter)
+                print(f"[Gate] iter_{new_iter} is the new selfplay model.")
+            else:
+                print(f"[Gate] Keeping iter_{prev_best} for selfplay "
+                      f"(iter_{new_iter} did not pass).")
 
         iter_time = time.time() - iter_start
         print(f"\n[{datetime.now().strftime('%H:%M:%S')}] "
