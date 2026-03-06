@@ -101,12 +101,18 @@ def get_absolute_board(node):
     return state
 
 
-def play_game(game, mcts1, mcts2, num_simulations1=800, num_simulations2=800, max_moves=MAX_MOVES_PER_GAME):
+def play_game(game, mcts1, mcts2, num_simulations1=800, num_simulations2=800,
+              max_moves=MAX_MOVES_PER_GAME, temperature_moves=8):
     """
     Play a single game. mcts1 plays as Black (player 1), mcts2 plays as White (player -1).
     Reuses MCTS subtrees between moves (same pattern as selfplay.py).
 
     num_simulations1 / num_simulations2 can differ, allowing handicap matches.
+
+    temperature_moves: number of opening moves selected by sampling proportionally to
+        visit counts (temperature=1). After this many moves, play switches to greedy
+        argmax for full-strength evaluation. This ensures game diversity without
+        degrading model strength in the decisive phase of the game.
 
     Returns:
         winner: 1 (Black/mcts1 wins), -1 (White/mcts2 wins), 0 (draw)
@@ -142,7 +148,8 @@ def play_game(game, mcts1, mcts2, num_simulations1=800, num_simulations2=800, ma
         top_indices = np.argsort(visit_counts)[::-1][:3]
         top_moves = [(action_to_str(int(idx)), int(visit_counts[idx])) for idx in top_indices if visit_counts[idx] > 0]
 
-        action, node, _ = current_mcts.select_move(node=node, mode="exploit", temperature=1)
+        mode = "explore" if move_count < temperature_moves else "exploit"
+        action, node, _ = current_mcts.select_move(node=node, mode=mode, temperature=1)
         action_index = np.argmax(action)
 
         move_count += 1
@@ -161,7 +168,7 @@ def play_game(game, mcts1, mcts2, num_simulations1=800, num_simulations2=800, ma
 
 
 def run_matchup(game, vpn1, vpn2, num_games=20, num_simulations1=800, num_simulations2=800,
-                label1="Model1", label2="Model2"):
+                label1="Model1", label2="Model2", temperature_moves=8):
     """
     Run a matchup between two models. Each model plays half the games as Black.
 
@@ -180,7 +187,8 @@ def run_matchup(game, vpn1, vpn2, num_games=20, num_simulations1=800, num_simula
     for i in tqdm(range(num_games), desc=desc, leave=False):
         if i % 2 == 0:
             # model1 as Black, model2 as White
-            result, moves, history = play_game(game, mcts1, mcts2, num_simulations1, num_simulations2)
+            result, moves, history = play_game(game, mcts1, mcts2, num_simulations1, num_simulations2,
+                                               temperature_moves=temperature_moves)
             black_label, white_label = label1, label2
             if result == 1:
                 wins1 += 1
@@ -190,7 +198,8 @@ def run_matchup(game, vpn1, vpn2, num_games=20, num_simulations1=800, num_simula
                 draws += 1
         else:
             # model2 as Black, model1 as White
-            result, moves, history = play_game(game, mcts2, mcts1, num_simulations2, num_simulations1)
+            result, moves, history = play_game(game, mcts2, mcts1, num_simulations2, num_simulations1,
+                                               temperature_moves=temperature_moves)
             black_label, white_label = label2, label1
             if result == 1:
                 wins2 += 1
@@ -239,7 +248,7 @@ def write_game_log(filepath, results_list, header_info=""):
             f.write(f"MATCHUP: {result['model1']} vs {result['model2']}\n")
             f.write(f"  {result['model1']}: {result['wins1']} wins ({result['winrate1']:.0f}%)\n")
             f.write(f"  {result['model2']}: {result['wins2']} wins ({result['winrate2']:.0f}%)\n")
-            f.write(f"  Draws: {result['draws']}  |  Avg moves/game: {result['avg_moves']:.1f}\n")
+            f.write(f"  Avg moves/game: {result['avg_moves']:.1f}\n")
             f.write(f"{'='*80}\n\n")
 
             for game in result["game_logs"]:
@@ -264,8 +273,48 @@ def print_matchup_result(result):
     print(f"\n  {result['model1']} vs {result['model2']}:")
     print(f"    {result['model1']:>12s}: {result['wins1']} wins ({result['winrate1']:.0f}%)")
     print(f"    {result['model2']:>12s}: {result['wins2']} wins ({result['winrate2']:.0f}%)")
-    print(f"    {'Draws':>12s}: {result['draws']}")
     print(f"    Avg moves/game: {result['avg_moves']:.1f}")
+
+
+def plot_single_matchup_result(result, args):
+    """Create a bar chart for a single matchup result."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    output_dir = os.path.join(script_dir, cfg.TEST_OUTPUT_PATH)
+    os.makedirs(output_dir, exist_ok=True)
+
+    label1 = result["model1"]
+    label2 = result["model2"]
+    wins1 = result["wins1"]
+    wins2 = result["wins2"]
+    total = result["games"]
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+
+    categories = [label1, label2]
+    counts = [wins1, wins2]
+    colors = ["steelblue", "tomato"]
+
+    bars = ax.bar(categories, counts, color=colors, alpha=0.85, width=0.5)
+
+    for bar, count in zip(bars, counts):
+        pct = count / total * 100 if total > 0 else 0
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 0.1,
+            f"{count}\n({pct:.0f}%)",
+            ha="center", va="bottom", fontsize=11,
+        )
+
+    ax.set_ylabel("Games")
+    ax.set_ylim(0, total + 2)
+    ax.set_title(f"{label1} vs {label2}  —  {BOARD_SIZE}x{BOARD_SIZE} Go")
+    ax.grid(axis="y", alpha=0.3)
+
+    plt.tight_layout()
+    out_path = os.path.join(output_dir, f"model_vs_model_{args.model1}_vs_{args.model2}.png")
+    plt.savefig(out_path, dpi=150)
+    plt.close()
+    print(f"Bar chart saved to: {out_path}")
 
 
 def run_single_matchup(args):
@@ -296,6 +345,7 @@ def run_single_matchup(args):
         num_simulations2=args.simulations2,
         label1=f"iter_{args.model1}",
         label2=f"iter_{args.model2}",
+        temperature_moves=args.temperature_moves,
     )
     print_matchup_result(result)
 
@@ -307,6 +357,9 @@ def run_single_matchup(args):
     header = (f"Iterations: {args.model1} vs {args.model2}\n"
               f"Games: {args.games} | Simulations: {args.simulations1} (model1) / {args.simulations2} (model2)\n")
     write_game_log(log_path, [result], header)
+
+    # Bar chart
+    plot_single_matchup_result(result, args)
 
 
 def run_gauntlet(args):
@@ -373,6 +426,7 @@ def run_gauntlet(args):
             num_simulations2=args.simulations2,
             label1=f"iter_{it_old}",
             label2=f"iter_{it_new}",
+            temperature_moves=args.temperature_moves,
         )
         results.append(result)
         print_matchup_result(result)
@@ -385,23 +439,21 @@ def run_gauntlet(args):
     print(f"\n{'='*60}")
     print("GAUNTLET SUMMARY")
     print(f"{'='*60}")
-    print(f"{'Matchup':<25s} {'Newer Wins':>10s} {'Older Wins':>10s} {'Draws':>6s} {'Newer WR':>9s}")
-    print("-" * 65)
+    print(f"{'Matchup':<25s} {'Newer Wins':>10s} {'Older Wins':>10s} {'Newer WR':>9s}")
+    print("-" * 57)
 
     newer_wins_total = 0
     older_wins_total = 0
-    draws_total = 0
 
     for r in results:
         newer_wr = r["winrate2"]
-        print(f"{r['model1']} vs {r['model2']:<10s} {r['wins2']:>10d} {r['wins1']:>10d} {r['draws']:>6d} {newer_wr:>8.0f}%")
+        print(f"{r['model1']} vs {r['model2']:<10s} {r['wins2']:>10d} {r['wins1']:>10d} {newer_wr:>8.0f}%")
         newer_wins_total += r["wins2"]
         older_wins_total += r["wins1"]
-        draws_total += r["draws"]
 
-    total_games = newer_wins_total + older_wins_total + draws_total
-    print("-" * 65)
-    print(f"{'TOTAL':<25s} {newer_wins_total:>10d} {older_wins_total:>10d} {draws_total:>6d} {newer_wins_total/total_games*100:>8.1f}%")
+    total_games = newer_wins_total + older_wins_total
+    print("-" * 57)
+    print(f"{'TOTAL':<25s} {newer_wins_total:>10d} {older_wins_total:>10d} {newer_wins_total/total_games*100:>8.1f}%")
 
     # Save game log
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -429,14 +481,12 @@ def plot_gauntlet_results(results, iterations, args):
     matchup_labels = [f"{r['model1']}\nvs\n{r['model2']}" for r in results]
     newer_wr = [r["winrate2"] for r in results]
     older_wr = [r["winrate1"] for r in results]
-    draw_pct = [r["draws"] / r["games"] * 100 for r in results]
 
     x = np.arange(len(results))
-    width = 0.25
+    width = 0.35
 
-    bars1 = ax.bar(x - width, newer_wr, width, label="Newer model wins %", color="green", alpha=0.8)
-    bars2 = ax.bar(x, older_wr, width, label="Older model wins %", color="red", alpha=0.8)
-    bars3 = ax.bar(x + width, draw_pct, width, label="Draw %", color="gray", alpha=0.8)
+    bars1 = ax.bar(x - width / 2, newer_wr, width, label="Newer model wins %", color="green", alpha=0.8)
+    bars2 = ax.bar(x + width / 2, older_wr, width, label="Older model wins %", color="red", alpha=0.8)
 
     ax.set_ylabel("Percentage")
     ax.set_title(f"Model vs Model Gauntlet - {BOARD_SIZE}x{BOARD_SIZE} Go\n({args.games} games, {args.simulations} sims/move)")
@@ -486,11 +536,98 @@ def plot_gauntlet_results(results, iterations, args):
     print(f"\nResults chart saved to: {output_path}")
 
 
+def run_iters_gauntlet(args):
+    """Run gauntlet over an explicit list of iteration numbers (--iters)."""
+    model_dir = find_model_dir()
+    if not model_dir:
+        print("ERROR: No model directory found!")
+        return
+
+    iterations = [int(x.strip()) for x in args.iters.split(",") if x.strip()]
+    if len(iterations) < 2:
+        print("ERROR: --iters requires at least 2 comma-separated iteration numbers")
+        return
+
+    print(f"\nTesting iterations: {iterations}")
+    print(f"Matchups: {len(iterations) - 1}")
+    print(f"Games per matchup: {args.games}")
+    print(f"MCTS simulations: {args.simulations1} (older) / {args.simulations2} (newer)")
+    print(f"Board: {BOARD_SIZE}x{BOARD_SIZE} Go")
+    print(f"{'='*60}")
+
+    game = Go()
+    results = []
+
+    models = {}
+    for it in iterations:
+        print(f"Loading iteration {it}...")
+        models[it] = load_model(model_dir, it)
+
+    print(f"\n{'='*60}")
+    print("Running matchups...")
+    print(f"{'='*60}")
+
+    for i in range(len(iterations) - 1):
+        it_old = iterations[i]
+        it_new = iterations[i + 1]
+
+        result = run_matchup(
+            game, models[it_old], models[it_new],
+            num_games=args.games,
+            num_simulations1=args.simulations1,
+            num_simulations2=args.simulations2,
+            label1=f"iter_{it_old}",
+            label2=f"iter_{it_new}",
+            temperature_moves=args.temperature_moves,
+        )
+        results.append(result)
+        print_matchup_result(result)
+
+    del models
+    torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
+    # Summary table
+    print(f"\n{'='*60}")
+    print("STRENGTH CURVE SUMMARY")
+    print(f"{'='*60}")
+    print(f"{'Matchup':<25s} {'Newer Wins':>10s} {'Older Wins':>10s} {'Newer WR':>9s}")
+    print("-" * 57)
+
+    newer_wins_total = 0
+    older_wins_total = 0
+    for r in results:
+        newer_wr = r["winrate2"]
+        print(f"{r['model1']} vs {r['model2']:<10s} {r['wins2']:>10d} {r['wins1']:>10d} {newer_wr:>8.0f}%")
+        newer_wins_total += r["wins2"]
+        older_wins_total += r["wins1"]
+
+    total_games = newer_wins_total + older_wins_total
+    if total_games > 0:
+        print("-" * 57)
+        print(f"{'TOTAL':<25s} {newer_wins_total:>10d} {older_wins_total:>10d} "
+              f"{newer_wins_total/total_games*100:>8.1f}%")
+
+    # Save log
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    output_dir = os.path.join(script_dir, cfg.TEST_OUTPUT_PATH)
+    os.makedirs(output_dir, exist_ok=True)
+    iters_str = "_".join(str(i) for i in iterations)
+    log_path = os.path.join(output_dir, f"strength_curve_{iters_str}.txt")
+    header = (f"Strength curve: iterations {iterations}\n"
+              f"Games per matchup: {args.games} | Simulations: {args.simulations1} / {args.simulations2}\n")
+    write_game_log(log_path, results, header)
+
+    plot_gauntlet_results(results, iterations, args)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Test Go models from different iterations against each other")
     parser.add_argument("--model1", type=int, help="First model iteration number")
     parser.add_argument("--model2", type=int, help="Second model iteration number")
     parser.add_argument("--gauntlet", action="store_true", help="Run gauntlet: consecutive iterations play each other")
+    parser.add_argument("--iters", type=str, default=None,
+                        help="Comma-separated exact iteration numbers for strength-curve gauntlet "
+                             "(e.g. --iters 20,40,50,55,60,62)")
     parser.add_argument("--start", type=int, default=None, help="Start iteration for gauntlet")
     parser.add_argument("--end", type=int, default=None, help="End iteration for gauntlet")
     parser.add_argument("--step", type=int, default=5, help="Step size between iterations in gauntlet (default: 5)")
@@ -498,6 +635,8 @@ def main():
     parser.add_argument("--simulations", type=int, default=200, help="MCTS simulations per move for both models (default: 200)")
     parser.add_argument("--simulations1", type=int, default=None, help="MCTS simulations for model1/older (overrides --simulations)")
     parser.add_argument("--simulations2", type=int, default=None, help="MCTS simulations for model2/newer (overrides --simulations)")
+    parser.add_argument("--temperature_moves", type=int, default=8,
+                        help="Opening moves sampled by visit-count proportion for game diversity; rest played greedily (default: 8)")
 
     args = parser.parse_args()
 
@@ -507,7 +646,9 @@ def main():
     if args.simulations2 is None:
         args.simulations2 = args.simulations
 
-    if args.gauntlet:
+    if args.iters is not None:
+        run_iters_gauntlet(args)
+    elif args.gauntlet:
         run_gauntlet(args)
     elif args.model1 is not None and args.model2 is not None:
         run_single_matchup(args)
@@ -521,6 +662,7 @@ def main():
             print(f"  Single matchup:  BOARD_SIZE=9 python test_model_vs_model.py --model1 10 --model2 20")
             print(f"  Gauntlet:        BOARD_SIZE=9 python test_model_vs_model.py --gauntlet --step 5")
             print(f"  Custom range:    BOARD_SIZE=9 python test_model_vs_model.py --gauntlet --start 0 --end 34 --step 5")
+            print(f"  Strength curve:  BOARD_SIZE=9 python test_model_vs_model.py --iters 20,40,50,55,60,62 --games 100")
         else:
             print("No model directory found.")
 

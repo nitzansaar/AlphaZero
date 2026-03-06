@@ -69,6 +69,13 @@ class Config5x5:
     # Data augmentation
     USE_AUGMENTATION = True
 
+    # Model gating: new model must win >= GATE_WIN_RATE of GATE_GAMES games
+    # against the previous best before replacing it for selfplay data generation.
+    GATE_WIN_RATE = 0.55
+    GATE_GAMES = 20
+    GATE_SIMULATIONS = 200
+    GATE_TEMPERATURE_MOVES = 4  # opening moves sampled proportionally; rest greedy
+
     # Paths (board-size specific)
     SAVE_MODEL_PATH = "models_5x5"
     SAVE_PICKLES = "pickles_5x5"
@@ -101,7 +108,7 @@ class Config9x9:
     LEARNING_RATE = 0.001  # SGD LR
     WEIGHT_DECAY = 1e-4
     MOMENTUM = 0.9
-    LR_DECAY_ITERS = [100, 150]
+    LR_DECAY_ITERS = [30, 60]
     LR_DECAY_FACTOR = 0.1
 
     # MCTS settings
@@ -128,7 +135,7 @@ class Config9x9:
     POLICY_LR_MULTIPLIER = 3.0
 
     # Temperature for exploration
-    TEMP_THRESHOLD = 30  # More moves before deterministic (~33% of ~90-move game)
+    TEMP_THRESHOLD = 15  # Opening moves with temp=1; rest greedy (~17% of ~90-move game)
     INITIAL_TEMP = 1.0
 
     # Minimum move number before pass is allowed in C++ selfplay.
@@ -137,6 +144,13 @@ class Config9x9:
 
     # Data augmentation
     USE_AUGMENTATION = True
+
+    # Model gating: new model must win >= GATE_WIN_RATE of GATE_GAMES games
+    # against the previous best before replacing it for selfplay data generation.
+    GATE_WIN_RATE = 0.55
+    GATE_GAMES = 20
+    GATE_SIMULATIONS = 200
+    GATE_TEMPERATURE_MOVES = 4  # opening moves sampled proportionally; rest greedy
 
     # Paths (board-size specific)
     SAVE_MODEL_PATH = "models_9x9"
