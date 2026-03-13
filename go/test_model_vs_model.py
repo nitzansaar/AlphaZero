@@ -174,6 +174,7 @@ def run_matchup(game, vpn1, vpn2, num_games=20, num_simulations1=800, num_simula
 
     Returns dict with results.
     """
+    desc = f"{label1}({num_simulations1}s) vs {label2}({num_simulations2}s)"
     mcts1 = MonteCarloTreeSearch(game, vpn1.get_vp, vpn1.get_vp_batch)
     mcts2 = MonteCarloTreeSearch(game, vpn2.get_vp, vpn2.get_vp_batch)
 
@@ -183,10 +184,8 @@ def run_matchup(game, vpn1, vpn2, num_games=20, num_simulations1=800, num_simula
     total_moves = 0
     game_logs = []
 
-    desc = f"{label1}({num_simulations1}s) vs {label2}({num_simulations2}s)"
     for i in tqdm(range(num_games), desc=desc, leave=False):
         if i % 2 == 0:
-            # model1 as Black, model2 as White
             result, moves, history = play_game(game, mcts1, mcts2, num_simulations1, num_simulations2,
                                                temperature_moves=temperature_moves)
             black_label, white_label = label1, label2
@@ -197,7 +196,6 @@ def run_matchup(game, vpn1, vpn2, num_games=20, num_simulations1=800, num_simula
             else:
                 draws += 1
         else:
-            # model2 as Black, model1 as White
             result, moves, history = play_game(game, mcts2, mcts1, num_simulations2, num_simulations1,
                                                temperature_moves=temperature_moves)
             black_label, white_label = label2, label1

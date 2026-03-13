@@ -392,7 +392,7 @@ def main():
             print("Invalid choice. Please enter 'y' or 'n'")
 
     # Always use a fixed MCTS budget per move (no difficulty prompt).
-    num_simulations = 1600
+    num_simulations = 800
     print(f"\nBot settings: {num_simulations} MCTS simulations per move")
 
     while True:

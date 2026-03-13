@@ -16,6 +16,7 @@ if device == "cuda":
 class ValuePolicyNetwork:
     def __init__(self, path=None, use_compile=True):
         self.original_model = NeuralNetwork().to(device)
+        self.model_path = path  # kept so parallel workers can reload the model
 
         if path:
             try:

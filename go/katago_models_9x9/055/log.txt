@@ -1,0 +1,78 @@
+['./export_model_pytorch.py', '-checkpoint', '/tmp/katago_run/torchmodels_toexport/mytraining-s3534848-d4333340/model.ckpt', '-export-dir', '/tmp/katago_run/torchmodels_toexport/mytraining-s3534848-d4333340.exported', '-model-name', 'katago-mytraining-s3534848-d4333340', '-filename-prefix', 'model', '-use-swa']
+{'version': 15, 'norm_kind': 'fixup', 'bnorm_epsilon': 0.0001, 'bnorm_running_avg_momentum': 0.001, 'initial_conv_1x1': False, 'trunk_num_channels': 96, 'mid_num_channels': 96, 'gpool_num_channels': 32, 'use_attention_pool': False, 'gamma_weight_decay_center_1': True, 'num_attention_pool_heads': 4, 'block_kind': [['rconv1', 'regular'], ['rconv2', 'regular'], ['rconv3', 'regulargpool'], ['rconv4', 'regular'], ['rconv5', 'regulargpool'], ['rconv6', 'regular']], 'p1_num_channels': 32, 'g1_num_channels': 32, 'v1_num_channels': 32, 'sbv2_num_channels': 48, 'num_scorebeliefs': 4, 'v2_size': 64}
+Parameters in model:
+conv_spatial.weight, [96, 22, 3, 3], 19008 params
+linear_global.weight, [96, 19], 1824 params
+blocks.0.normactconv1.norm.beta, [1, 96, 1, 1], 96 params
+blocks.0.normactconv1.conv.weight, [96, 96, 3, 3], 82944 params
+blocks.0.normactconv2.norm.beta, [1, 96, 1, 1], 96 params
+blocks.0.normactconv2.norm.gamma, [1, 96, 1, 1], 96 params
+blocks.0.normactconv2.conv.weight, [96, 96, 3, 3], 82944 params
+blocks.1.normactconv1.norm.beta, [1, 96, 1, 1], 96 params
+blocks.1.normactconv1.conv.weight, [96, 96, 3, 3], 82944 params
+blocks.1.normactconv2.norm.beta, [1, 96, 1, 1], 96 params
+blocks.1.normactconv2.norm.gamma, [1, 96, 1, 1], 96 params
+blocks.1.normactconv2.conv.weight, [96, 96, 3, 3], 82944 params
+blocks.2.normactconv1.norm.beta, [1, 96, 1, 1], 96 params
+blocks.2.normactconv1.convpool.conv1r.weight, [64, 96, 3, 3], 55296 params
+blocks.2.normactconv1.convpool.conv1g.weight, [32, 96, 3, 3], 27648 params
+blocks.2.normactconv1.convpool.normg.beta, [1, 32, 1, 1], 32 params
+blocks.2.normactconv1.convpool.linear_g.weight, [64, 96], 6144 params
+blocks.2.normactconv2.norm.beta, [1, 64, 1, 1], 64 params
+blocks.2.normactconv2.norm.gamma, [1, 64, 1, 1], 64 params
+blocks.2.normactconv2.conv.weight, [96, 64, 3, 3], 55296 params
+blocks.3.normactconv1.norm.beta, [1, 96, 1, 1], 96 params
+blocks.3.normactconv1.conv.weight, [96, 96, 3, 3], 82944 params
+blocks.3.normactconv2.norm.beta, [1, 96, 1, 1], 96 params
+blocks.3.normactconv2.norm.gamma, [1, 96, 1, 1], 96 params
+blocks.3.normactconv2.conv.weight, [96, 96, 3, 3], 82944 params
+blocks.4.normactconv1.norm.beta, [1, 96, 1, 1], 96 params
+blocks.4.normactconv1.convpool.conv1r.weight, [64, 96, 3, 3], 55296 params
+blocks.4.normactconv1.convpool.conv1g.weight, [32, 96, 3, 3], 27648 params
+blocks.4.normactconv1.convpool.normg.beta, [1, 32, 1, 1], 32 params
+blocks.4.normactconv1.convpool.linear_g.weight, [64, 96], 6144 params
+blocks.4.normactconv2.norm.beta, [1, 64, 1, 1], 64 params
+blocks.4.normactconv2.norm.gamma, [1, 64, 1, 1], 64 params
+blocks.4.normactconv2.conv.weight, [96, 64, 3, 3], 55296 params
+blocks.5.normactconv1.norm.beta, [1, 96, 1, 1], 96 params
+blocks.5.normactconv1.conv.weight, [96, 96, 3, 3], 82944 params
+blocks.5.normactconv2.norm.beta, [1, 96, 1, 1], 96 params
+blocks.5.normactconv2.norm.gamma, [1, 96, 1, 1], 96 params
+blocks.5.normactconv2.conv.weight, [96, 96, 3, 3], 82944 params
+norm_trunkfinal.beta, [1, 96, 1, 1], 96 params
+policy_head.conv1p.weight, [32, 96, 1, 1], 3072 params
+policy_head.conv1g.weight, [32, 96, 1, 1], 3072 params
+policy_head.biasg.beta, [1, 32, 1, 1], 32 params
+policy_head.linear_g.weight, [32, 96], 3072 params
+policy_head.linear_pass.weight, [32, 96], 3072 params
+policy_head.linear_pass.bias, [32], 32 params
+policy_head.linear_pass2.weight, [6, 32], 192 params
+policy_head.bias2.beta, [1, 32, 1, 1], 32 params
+policy_head.conv2p.weight, [6, 32, 1, 1], 192 params
+value_head.conv1.weight, [32, 96, 1, 1], 3072 params
+value_head.bias1.beta, [1, 32, 1, 1], 32 params
+value_head.linear2.weight, [64, 96], 6144 params
+value_head.linear2.bias, [64], 64 params
+value_head.linear_valuehead.weight, [3, 64], 192 params
+value_head.linear_valuehead.bias, [3], 3 params
+value_head.linear_miscvaluehead.weight, [10, 64], 640 params
+value_head.linear_miscvaluehead.bias, [10], 10 params
+value_head.linear_moremiscvaluehead.weight, [8, 64], 512 params
+value_head.linear_moremiscvaluehead.bias, [8], 8 params
+value_head.conv_ownership.weight, [1, 32, 1, 1], 32 params
+value_head.conv_scoring.weight, [1, 32, 1, 1], 32 params
+value_head.conv_futurepos.weight, [2, 96, 1, 1], 192 params
+value_head.conv_seki.weight, [4, 96, 1, 1], 384 params
+value_head.linear_s2.weight, [48, 96], 4608 params
+value_head.linear_s2.bias, [48], 48 params
+value_head.linear_s2off.weight, [48, 1], 48 params
+value_head.linear_s2par.weight, [48, 1], 48 params
+value_head.linear_s3.weight, [4, 48], 192 params
+value_head.linear_s3.bias, [4], 4 params
+value_head.linear_smix.weight, [4, 96], 384 params
+value_head.linear_smix.bias, [4], 4 params
+Total num params: 1004333
+Total trainable params: 1004333
+Writing SWA model
+Exported at: 
+2026-03-09 21:15:58.498262 UTC
