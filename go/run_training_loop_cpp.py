@@ -111,6 +111,7 @@ def run_command(cmd, description):
 
 # ── Model Gating ──────────────────────────────────────────────────────────
 
+
 def _read_best_iter(model_dir):
     """Read current_best_iter.txt; return -1 if absent or unreadable."""
     path = os.path.join(model_dir, "current_best_iter.txt")
@@ -142,9 +143,8 @@ def gate_model(new_iter, prev_best_iter):
     """
     Evaluate new model (new_iter) against previous best (prev_best_iter).
 
-    Plays cfg.GATE_GAMES games with cfg.GATE_SIMULATIONS MCTS sims per move
-    (greedy, no random opening moves).  Returns True if the new model wins
-    >= cfg.GATE_WIN_RATE fraction of games.
+    Plays cfg.GATE_GAMES games sequentially with cfg.GATE_SIMULATIONS MCTS sims
+    per move.  Returns True if the new model wins >= cfg.GATE_WIN_RATE fraction.
 
     Auto-passes when there is no previous model to compare against.
     """
