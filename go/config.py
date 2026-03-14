@@ -104,7 +104,7 @@ class Config9x9:
     # Training settings - increased for larger board
     BATCH_SIZE = 512
     TRAIN_STEPS = 1500  
-    SELFPLAY_GAMES = 1000  # More games for diversity
+    SELFPLAY_GAMES = 500  # decreased to 500 to match katago
     LEARNING_RATE = 0.001  # SGD LR
     WEIGHT_DECAY = 1e-4
     MOMENTUM = 0.9
