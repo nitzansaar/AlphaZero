@@ -1,162 +1,36 @@
 #!/bin/bash
+# train.sh — Full selfplay → train → gate loop.
+# Run from the go/ directory: bash train.sh
 
-# RTX 5090 Optimization: Environment Variables
-# Enable TF32 for faster matrix multiplications on Ampere+ GPUs
-export NVIDIA_TF32_OVERRIDE=1
+set -euo pipefail
+cd "$(dirname "$0")"
 
-# Optimize CUDA memory allocation for better performance
-# Use the new CUDA memory allocator with expandable segments
-export PYTORCH_ALLOC_CONF=max_split_size_mb:512,expandable_segments:True
+while true; do
+    echo "Phase 1/3: Self-play..."
+    python3 selfplay_cpp_runner.py || { echo "ERROR: selfplay failed"; exit 1; }
 
-# Enable cuDNN auto-tuning
-export CUDNN_BENCHMARK=1
+    echo "Phase 2/3: Training..."
+    python3 train.py || { echo "ERROR: training failed"; exit 1; }
 
-# Change to src directory for relative imports
-cd "$(dirname "$0")" || exit
+    NEW_ITER=$(cat logs_9x9/current_iteration.txt)
+    BEST_ITER=$(cat models_9x9/current_best_iter.txt 2>/dev/null || echo "$NEW_ITER")
 
-# Activate virtual environment
-SCRIPT_DIR="$(dirname "$0")"
-VENV_PATH="$SCRIPT_DIR/../venv/bin/activate"
-if [ -f "$VENV_PATH" ]; then
-    source "$VENV_PATH"
-else
-    echo "Warning: Virtual environment not found at $VENV_PATH"
-    echo "Make sure required packages (numpy, torch, etc.) are installed"
-fi
+    echo "Phase 3/3: Gating iter $NEW_ITER vs $BEST_ITER..."
 
-# Number of iterations to run (default: 10, recommended for strong play)
-NUM_ITERATIONS=${1:-10}
+    # Export TorchScript models if not already present
+    NEW_TS="models_9x9/${NEW_ITER}_ts.pt"
+    BEST_TS="models_9x9/${BEST_ITER}_ts.pt"
 
-# Validate input
-if ! [[ "$NUM_ITERATIONS" =~ ^[0-9]+$ ]] || [ "$NUM_ITERATIONS" -lt 1 ]; then
-    echo "Error: Number of iterations must be a positive integer"
-    echo "Usage: $0 [number_of_iterations]"
-    echo "Example: $0 10  (runs 10 iterations)"
-    exit 1
-fi
+    [ -f "$NEW_TS"  ] || BOARD_SIZE=9 python3 export_model.py \
+        "models_9x9/${NEW_ITER}_best_model.pt" "$NEW_TS"
+    [ -f "$BEST_TS" ] || BOARD_SIZE=9 python3 export_model.py \
+        "models_9x9/${BEST_ITER}_best_model.pt" "$BEST_TS"
 
-echo "============================================"
-echo "5x5 Go - AlphaZero Training Pipeline"
-echo "============================================"
-echo "Iterations to run: $NUM_ITERATIONS"
-echo "============================================"
-echo ""
-
-START_TIME=$(date +%s)
-START_TIME_ISO=$(date -d "@$START_TIME" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date '+%Y-%m-%d %H:%M:%S')
-
-# Create timing log file (use same logs directory as Python scripts)
-TIMING_LOG="logs/timing_tracking.csv"
-mkdir -p logs
-if [ ! -f "$TIMING_LOG" ]; then
-    echo "iteration,start_time,end_time,duration_seconds,selfplay_seconds,training_seconds" > "$TIMING_LOG"
-fi
-
-# Run iterations
-for iteration in $(seq 1 $NUM_ITERATIONS); do
-    ITER_START=$(date +%s)
-    ITER_START_ISO=$(date -d "@$ITER_START" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date '+%Y-%m-%d %H:%M:%S')
-    
-    echo ""
-    echo "============================================"
-    echo "ITERATION $iteration / $NUM_ITERATIONS"
-    echo "============================================"
-    echo "Started at: $(date '+%Y-%m-%d %H:%M:%S')"
-    echo ""
-    
-    # Self-play phase
-    echo "Phase 1/2: Generating self-play games..."
-    SELFPLAY_START=$(date +%s)
-    python3 selfplay.py
-    
-    if [ $? -ne 0 ]; then
-        echo "Error: Self-play failed at iteration $iteration"
-        exit 1
+    if python3 gatekeeper_runner.py "$NEW_TS" "$BEST_TS" "$NEW_ITER" "$BEST_ITER"; then
+        echo "iter $NEW_ITER ACCEPTED as new selfplay model"
+    else
+        echo "iter $NEW_ITER REJECTED — keeping iter $BEST_ITER"
     fi
-    SELFPLAY_END=$(date +%s)
-    SELFPLAY_DURATION=$((SELFPLAY_END - SELFPLAY_START))
-    
-    echo ""
-    echo "Self-play complete. Starting training..."
-    
-    # Training phase
-    echo "Phase 2/2: Training neural network..."
-    TRAINING_START=$(date +%s)
-    python3 train.py
-    
-    if [ $? -ne 0 ]; then
-        echo "Error: Training failed at iteration $iteration"
-        exit 1
-    fi
-    TRAINING_END=$(date +%s)
-    TRAINING_DURATION=$((TRAINING_END - TRAINING_START))
 
-    ITER_END=$(date +%s)
-    ITER_DURATION=$((ITER_END - ITER_START))
-    ITER_MIN=$((ITER_DURATION / 60))
-    ITER_SEC=$((ITER_DURATION % 60))
-    
-    # Get actual iteration number for logging
-    actual_iter_num=$iteration
-    if [ -f "$iter_file" ]; then
-        actual_iter_num=$(cat "$iter_file")
-    fi
-    
-    # Save timing data
-    ITER_END_ISO=$(date -d "@$ITER_END" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date '+%Y-%m-%d %H:%M:%S')
-    echo "$actual_iter_num,$ITER_START_ISO,$ITER_END_ISO,$ITER_DURATION,$SELFPLAY_DURATION,$TRAINING_DURATION" >> "$TIMING_LOG"
-
-    echo ""
-    echo "Iteration $iteration complete in ${ITER_MIN}m ${ITER_SEC}s"
-    echo "  Breakdown: Self-play: $((SELFPLAY_DURATION / 60))m $((SELFPLAY_DURATION % 60))s | Training: $((TRAINING_DURATION / 60))m $((TRAINING_DURATION % 60))s"
-    
-    # Show progress
-    if [ $iteration -lt $NUM_ITERATIONS ]; then
-        REMAINING=$((NUM_ITERATIONS - iteration))
-        ELAPSED=$((ITER_END - START_TIME))
-        AVG_TIME=$((ELAPSED / iteration))
-        ESTIMATED=$((AVG_TIME * REMAINING))
-        EST_MIN=$((ESTIMATED / 60))
-        echo "Progress: $iteration/$NUM_ITERATIONS iterations complete"
-        echo "Estimated time remaining: ~${EST_MIN} minutes"
-        echo ""
-    fi
+    echo "=== Iteration $NEW_ITER complete at $(date) ==="
 done
-
-END_TIME=$(date +%s)
-END_TIME_ISO=$(date -d "@$END_TIME" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date '+%Y-%m-%d %H:%M:%S')
-TOTAL_DURATION=$((END_TIME - START_TIME))
-TOTAL_HOURS=$((TOTAL_DURATION / 3600))
-TOTAL_MIN=$(((TOTAL_DURATION % 3600) / 60))
-TOTAL_SEC=$((TOTAL_DURATION % 60))
-AVG_ITER_MIN=$((TOTAL_DURATION / NUM_ITERATIONS / 60))
-AVG_ITER_SEC=$(((TOTAL_DURATION / NUM_ITERATIONS) % 60))
-
-# Save overall timing summary
-TIMING_SUMMARY="logs/training_summary.txt"
-cat > "$TIMING_SUMMARY" << EOF
-============================================
-TRAINING SESSION SUMMARY
-============================================
-Start Time:     $START_TIME_ISO
-End Time:       $END_TIME_ISO
-Total Duration: ${TOTAL_HOURS}h ${TOTAL_MIN}m ${TOTAL_SEC}s
-Total Seconds:  $TOTAL_DURATION
-
-Iterations:     $NUM_ITERATIONS
-Avg per Iter:   ${AVG_ITER_MIN}m ${AVG_ITER_SEC}s
-============================================
-EOF
-
-echo ""
-echo "============================================"
-echo "TRAINING PIPELINE COMPLETE!"
-echo "============================================"
-echo "Start Time:     $START_TIME_ISO"
-echo "End Time:       $END_TIME_ISO"
-echo "Total Duration: ${TOTAL_HOURS}h ${TOTAL_MIN}m ${TOTAL_SEC}s"
-echo "Total Seconds:  $TOTAL_DURATION"
-echo ""
-echo "Iterations:     $NUM_ITERATIONS"
-echo "Avg per Iter:   ${AVG_ITER_MIN}m ${AVG_ITER_SEC}s"
-echo "============================================"

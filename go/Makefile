@@ -19,7 +19,7 @@ MCTS_CPP = mcts.cpp
 NN_CPP   = nn_inference.cpp
 NPY_C    = npy_writer.c
 
-BINARIES = test_go_engine test_mcts test_nn selfplay_cpp
+BINARIES = test_go_engine test_mcts test_nn selfplay_cpp gatekeeper
 
 .PHONY: all tests clean
 
@@ -39,6 +39,10 @@ test_nn: $(ENGINE_C) $(MCTS_CPP) $(NN_CPP) tests/test_nn.cpp
 
 # Phase 4 — Self-play data generator (C++ + LibTorch)
 selfplay_cpp: $(ENGINE_C) $(MCTS_CPP) $(NN_CPP) $(NPY_C) selfplay_cpp.cpp
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
+
+# Model gating binary (C++ + LibTorch)
+gatekeeper: $(ENGINE_C) $(MCTS_CPP) $(NN_CPP) gatekeeper.cpp
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 
 # Run all test binaries
