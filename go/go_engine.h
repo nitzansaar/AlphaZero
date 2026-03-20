@@ -23,7 +23,7 @@ extern "C" {
 #define NUM_POSITIONS 81        /* 9 * 9 */
 #define PASS_ACTION   81
 #define ACTION_SIZE   82        /* 81 positions + 1 pass */
-#define KOMI          5.5f      /* standard 9x9 komi */
+#define KOMI          6f      /* standard 9x9 komi */
 
 /* ── Game state ───────────────────────────────────────────────────────── */
 
