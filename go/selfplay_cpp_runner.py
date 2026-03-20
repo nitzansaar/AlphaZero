@@ -74,11 +74,14 @@ def get_latest_model_path():
     all_models = [m for m in all_models if not m.endswith("_ts.pt")]
     if not all_models:
         return None
-    files = [
-        int(os.path.basename(f).split("_")[0])
-        for f in all_models
-        if os.path.basename(f).split("_")[0].isdigit()
-    ]
+    def _parse_iter(path):
+        stem = os.path.basename(path).split("_")[0]
+        try:
+            return int(stem)
+        except ValueError:
+            return None
+
+    files = [n for n in (_parse_iter(f) for f in all_models) if n is not None]
     if not files:
         return None
     latest_num = max(files)
