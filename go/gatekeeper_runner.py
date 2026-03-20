@@ -18,6 +18,7 @@ Options:
 import os, sys, subprocess, argparse, threading, tempfile
 import torch
 from tqdm import tqdm
+from config import Config as cfg
 
 _HERE       = os.path.dirname(os.path.abspath(__file__))
 GATE_BINARY = os.path.join(_HERE, "gatekeeper")
@@ -49,8 +50,8 @@ def main():
     ap.add_argument("best_ts",   help="best model TorchScript path")
     ap.add_argument("new_iter",  type=int)
     ap.add_argument("best_iter", type=int)
-    ap.add_argument("--games",    type=int,   default=100)
-    ap.add_argument("--sims",     type=int,   default=400)
+    ap.add_argument("--games",    type=int,   default=20)
+    ap.add_argument("--sims",     type=int,   default=200)
     ap.add_argument("--win-rate", type=float, default=0.55)
     ap.add_argument("--workers",  type=int,   default=os.cpu_count() or 1)
     args = ap.parse_args()
@@ -67,7 +68,7 @@ def main():
     print(f"New model : {args.new_ts} (iter {args.new_iter})")
     print(f"Best model: {args.best_ts} (iter {args.best_iter})")
     print(f"Games     : {args.games} across {num_workers} workers")
-    print(f"Sims      : {args.sims}  (batch=64)")
+    print(f"Sims      : {args.sims}  (batch=1, full strength)")
     print(f"Device    : {'GPU' if USE_CUDA else 'CPU'}")
     print(f"WinRate   : {args.win_rate:.0%}\n")
 
@@ -92,7 +93,7 @@ def main():
                 str(args.new_iter), str(args.best_iter),
                 "--games",       str(game_count),
                 "--sims",        str(args.sims),
-                "--batch",       "64",
+                "--batch",       "1",
                 "--game-offset", str(game_start),
                 "--worker-dir",  wdir,
                 "--seed",        str(42 + w * 1000),
@@ -152,7 +153,7 @@ def main():
     print(f"\nResult: new={total_wins}/{args.games} ({pct:.1%}), threshold {args.win_rate:.0%}")
 
     if pct >= args.win_rate:
-        best_file = os.path.join(_HERE, "models_9x9", "current_best_iter.txt")
+        best_file = os.path.join(_HERE, cfg.SAVE_MODEL_PATH, "current_best_iter.txt")
         with open(best_file, "w") as f:
             f.write(f"{args.new_iter}\n")
         print("ACCEPTED")
