@@ -31,13 +31,13 @@ void NNInference::eval(const float *planes, int batch_size,
      * Build input tensor from the caller's float buffer without copying
      * (from_blob wraps in-place; .to(device_) copies to GPU when needed).
      *
-     * planes layout: batch × 3 × NUM_POSITIONS (flat).
-     * NN expects:    batch × 3 × BOARD_SIZE × BOARD_SIZE.
+     * planes layout: batch × 17 × NUM_POSITIONS (flat).
+     * NN expects:    batch × 17 × BOARD_SIZE × BOARD_SIZE.
      * Both shapes represent the same contiguous memory.
      */
     torch::Tensor input = torch::from_blob(
         const_cast<float *>(planes),
-        {batch_size, 3, BOARD_SIZE, BOARD_SIZE},
+        {batch_size, 17, BOARD_SIZE, BOARD_SIZE},
         torch::TensorOptions().dtype(torch::kFloat32)
     ).to(device_);
 

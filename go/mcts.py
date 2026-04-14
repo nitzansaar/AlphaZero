@@ -132,7 +132,7 @@ class MonteCarloTreeSearch:
             # Fresh node: already in absolute form
             absolute_state = root_state
 
-        value, action_probs = self.policy_value_network(absolute_state, player)
+        value, action_probs = self.policy_value_network(absolute_state, player, node=root_node)
         # In canonical form, current player's stones = 1, so use player=1 for valid move check
         # For fresh root nodes (absolute form), player is already 1 (Black starts)
         valid_moves_player = 1 if root_node.parent is not None else player
@@ -170,7 +170,7 @@ class MonteCarloTreeSearch:
             # Convert from relative form to absolute form for neural network
             absolute_leaf_state = leaf_node_state.copy()
             absolute_leaf_state[:NUM_POSITIONS] *= leaf_node.player
-            value, action_probs = self.policy_value_network(absolute_leaf_state, leaf_node.player)
+            value, action_probs = self.policy_value_network(absolute_leaf_state, leaf_node.player, node=leaf_node)
             winner = self.game.get_reward_for_next_player(leaf_node_state, leaf_node.player)
 
             if winner is None:
@@ -212,7 +212,7 @@ class MonteCarloTreeSearch:
             absolute_state = root_state
 
         # Initial expansion of root node (single NN call)
-        value, action_probs = self.policy_value_network(absolute_state, player)
+        value, action_probs = self.policy_value_network(absolute_state, player, node=root_node)
         valid_moves_player = 1 if root_node.parent is not None else player
         valid_moves = self.game.get_valid_moves(root_state, valid_moves_player)
         action_probs = action_probs * valid_moves
@@ -277,6 +277,7 @@ class MonteCarloTreeSearch:
             states_to_eval = []
             players_to_eval = []
             valid_moves_list = []
+            nodes_to_eval = []
 
             for leaf_node, action_index, parent_node in unique_leaf_data:
                 # Compute leaf state if not already set
@@ -294,13 +295,15 @@ class MonteCarloTreeSearch:
                     absolute_leaf_state[:NUM_POSITIONS] *= leaf_node.player
                     states_to_eval.append(absolute_leaf_state)
                     players_to_eval.append(leaf_node.player)
+                    nodes_to_eval.append(leaf_node)
                     # Canonical form: current player = 1
                     valid_moves = self.game.get_valid_moves(leaf_node.state, 1)
                     valid_moves_list.append(valid_moves)
 
             # Batch evaluate unique leaf nodes with single NN call
             if states_to_eval:
-                values, policies = self.policy_value_network_batch(states_to_eval, players_to_eval)
+                values, policies = self.policy_value_network_batch(
+                    states_to_eval, players_to_eval, nodes=nodes_to_eval)
             else:
                 values, policies = [], []
 

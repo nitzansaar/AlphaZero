@@ -25,11 +25,16 @@ class GoDataset:
         policies = np.empty((n, len(dataset[0][1])), dtype=np.float32) if n > 0 else np.empty((0, 0), dtype=np.float32)
 
         for i, datapoint in enumerate(dataset):
-            state_flat = datapoint[0]
+            state = datapoint[0]
             player = datapoint[2]
             values[i] = datapoint[3]
             policies[i] = datapoint[1]
-            canonical_list.append(board_to_canonical_3d(state_flat, player))
+            if isinstance(state, np.ndarray) and state.ndim == 3:
+                # Pre-computed 17-plane state from C++ selfplay — use directly.
+                canonical_list.append(state.astype(np.float32))
+            else:
+                # Legacy flat board state — convert to 3-plane canonical.
+                canonical_list.append(board_to_canonical_3d(state, player))
 
         if n > 0:
             self.canonical = torch.from_numpy(np.stack(canonical_list))
@@ -42,10 +47,13 @@ class GoDataset:
         return self.values.shape[0]
 
     def __getitem__(self, index):
-        # Apply data augmentation with 50% probability
-        if self.use_augmentation and random.random() < 0.5:
+        # Apply data augmentation with 50% probability.
+        # Only applies to legacy flat-board states; 17-plane pre-computed states skip it.
+        state_raw = self.states_flat[index]
+        is_precomputed_3d = isinstance(state_raw, np.ndarray) and state_raw.ndim == 3
+        if self.use_augmentation and not is_precomputed_3d and random.random() < 0.5:
             transform_type = random.choice(self.augmentations)
-            state_flat, p = augment_data(self.states_flat[index], self.policies[index].numpy(), transform_type)
+            state_flat, p = augment_data(state_raw, self.policies[index].numpy(), transform_type)
             state_canonical = board_to_canonical_3d(state_flat, self.players[index])
             return (torch.from_numpy(state_canonical),
                     self.values[index],
@@ -83,19 +91,21 @@ class TrainingDataset:
         self.training_dataset = self.training_dataset[-1 * cfg.DATASET_QUEUE_SIZE:]
 
     def load_from_npy(self, npy_dir):
-        """Load positions produced by selfplay_cpp from three .npy files.
+        """Load positions produced by selfplay_cpp from .npy files.
 
         Reads:
-          <npy_dir>/states.npy    (N, 3, 9, 9)  float32 canonical board planes
-          <npy_dir>/policies.npy  (N, 82)        float32 MCTS visit probabilities
-          <npy_dir>/values.npy    (N,)            float32 game outcome values
+          <npy_dir>/states.npy    (N, 17, 9, 9)  float32 — 17-plane AlphaZero input
+          <npy_dir>/policies.npy  (N, 82)         float32 — MCTS visit probabilities
+          <npy_dir>/values.npy    (N,)             float32 — game outcome values
 
-        Each position is stored as [board_flat, action_probs, player=1, value]
-        where board_flat is an 81-element array with current-player stones = +1.
-        This is fully compatible with GoDataset and board_to_canonical_3d.
+        States are stored as pre-computed (17,9,9) tensors; GoDataset uses them
+        directly without calling board_to_canonical_3d.  Plane 16 encodes
+        color-to-play (1.0 = Black, 0.0 = White).
+
+        Any additional files (ownership.npy, scores.npy) are silently ignored.
         """
         import os as _os
-        states   = np.load(_os.path.join(npy_dir, 'states.npy'))    # (N, 3, 9, 9)
+        states   = np.load(_os.path.join(npy_dir, 'states.npy'))    # (N, 17, 9, 9)
         policies = np.load(_os.path.join(npy_dir, 'policies.npy'))  # (N, 82)
         values   = np.load(_os.path.join(npy_dir, 'values.npy'))    # (N,)
 
@@ -103,18 +113,13 @@ class TrainingDataset:
         print(f"Loaded {N} positions from {npy_dir}")
 
         for i in range(N):
-            # Recover absolute color from the color-to-play plane (plane 2).
-            color = 1 if states[i, 2, 0, 0] > 0.5 else -1
-            # Convert canonical planes to absolute board form.
-            # plane 0 = current-player stones (+1), plane 1 = opponent (-1).
-            # Multiplying by color converts canonical → absolute (Black=+1, White=-1).
-            canonical_board = (states[i, 0] - states[i, 1]).flatten().astype(np.float32)
-            absolute_board = canonical_board * color
+            # Plane 16 encodes color-to-play: 1.0 = Black (+1), 0.0 = White (-1).
+            color = 1 if states[i, 16, 0, 0] > 0.5 else -1
             self.training_dataset.append([
-                absolute_board,      # (81,) absolute board (Black=+1, White=-1)
+                states[i],           # (17, 9, 9) pre-computed canonical planes
                 policies[i],         # (82,) MCTS visit probabilities
-                color,               # absolute player who moved (+1 or -1)
-                float(values[i]),    # game outcome from this player's perspective
+                color,               # current player (+1 or -1)
+                float(values[i]),    # game outcome from current player's perspective
             ])
 
         self.training_dataset = self.training_dataset[-cfg.DATASET_QUEUE_SIZE:]

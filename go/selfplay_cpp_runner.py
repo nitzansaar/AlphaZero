@@ -188,7 +188,6 @@ if __name__ == "__main__":
                 "--output",         worker_dir,
                 "--temp-moves",     str(cfg.TEMP_THRESHOLD),
                 "--max-moves",      "200",
-                "--min-pass-move",  str(cfg.MIN_PASS_MOVE),
                 "--seed",           str(i * 1000),
             ]
             if USE_CUDA:
