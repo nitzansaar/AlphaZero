@@ -1,13 +1,27 @@
 """
-Play KataGo (trained .bin.gz model) vs our AlphaZero implementation.
+Play KataGo vs our AlphaZero implementation on 9x9 Go.
 
-Usage:
-    BOARD_SIZE=9 python katago_vs_alphazero.py \
-        --katago-model katago_models_9x9/mytraining-s120320-d3911050/model.bin.gz \
-        --az-iter 142 \
-        --games 20 \
-        --simulations 200 \
-        --katago-visits 200
+KataGo model — pick one of:
+  --katago-elo 482          pretrained_katago_models/katago-elo-482.gz  (available: 482, 802)
+  --katago-elo 802          pretrained_katago_models/katago-elo-802.gz
+  --katago-model <path>     any .bin.gz or .txt.gz model file (full path)
+
+AlphaZero model:
+  --az-iter 236             iteration number; loads models_9x9_base/236_best_model.pt by default
+  --az-model-dir <dir>      override the model directory (default: cfg.SAVE_MODEL_PATH = models_9x9_base)
+
+Examples:
+    # Single game with verbose board output
+    BOARD_SIZE=9 python katago_vs_alphazero.py \\
+        --katago-elo 482 --az-iter 236 --games 1 --verbose
+
+    # 10-game series, more search budget on both sides
+    BOARD_SIZE=9 python katago_vs_alphazero.py \\
+        --katago-elo 802 --az-iter 200 --games 10
+
+    # Custom KataGo model by path
+    BOARD_SIZE=9 python katago_vs_alphazero.py \\
+        --katago-model /path/to/model.bin.gz --az-iter 142 --games 20
 """
 
 import os
@@ -17,9 +31,6 @@ import subprocess
 import numpy as np
 from glob import glob
 import torch
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
 from config import Config as cfg, BOARD_SIZE, NUM_POSITIONS, PASS_ACTION, ACTION_SIZE, KOMI
 from game import Go
@@ -31,6 +42,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 KATAGO_BIN = os.path.join(SCRIPT_DIR, "KataGo", "cpp", "katago")
 GTP_CONFIG  = os.path.join(SCRIPT_DIR, "KataGo", "cpp", "configs", "gtp_example.cfg")
+PRETRAINED_KATAGO_DIR = os.path.join(SCRIPT_DIR, "pretrained_katago_models")
 
 # GTP column letters: A-H then J (skip I), standard Go convention
 GTP_COLS = "ABCDEFGHJ"[:BOARD_SIZE]
@@ -80,7 +92,7 @@ class KataGoGTP:
             cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
         )
@@ -96,7 +108,11 @@ class KataGoGTP:
         while True:
             line = self.proc.stdout.readline()
             if line == "":
-                raise RuntimeError(f"KataGo process exited unexpectedly during '{command}'")
+                stderr_out = self.proc.stderr.read()
+                msg = f"KataGo process exited unexpectedly during '{command}'"
+                if stderr_out.strip():
+                    msg += f"\nKataGo stderr:\n{stderr_out.strip()}"
+                raise RuntimeError(msg)
             line = line.rstrip("\n")
             if line.startswith("=") or line.startswith("?"):
                 lines.append(line)
@@ -136,8 +152,9 @@ class KataGoGTP:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def load_az_model(iteration):
-    model_dir = os.path.join(SCRIPT_DIR, cfg.SAVE_MODEL_PATH)
+def load_az_model(iteration, model_dir=None):
+    if model_dir is None:
+        model_dir = os.path.join(SCRIPT_DIR, cfg.SAVE_MODEL_PATH)
     model_path = os.path.join(model_dir, cfg.BEST_MODEL.format(iteration))
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"AlphaZero model not found: {model_path}")
@@ -153,8 +170,19 @@ def _find_katago_model(folder):
     return None
 
 
+def _find_katago_by_elo(elo):
+    """Return path to pretrained_katago_models/katago-elo-{elo}.gz, or raise."""
+    path = os.path.join(PRETRAINED_KATAGO_DIR, f"katago-elo-{elo}.gz")
+    if os.path.exists(path):
+        return path
+    available = sorted(os.listdir(PRETRAINED_KATAGO_DIR))
+    raise FileNotFoundError(
+        f"No pretrained KataGo model for elo={elo}. Available: {available}"
+    )
+
+
 def latest_katago_model():
-    base = os.path.join(SCRIPT_DIR, "katago_models_9x9")
+    base = os.path.join(SCRIPT_DIR, "pretrained_katago_models_9x9")
     folders = sorted(glob(os.path.join(base, "*")))
     for folder in reversed(folders):
         p = _find_katago_model(folder)
@@ -183,12 +211,12 @@ def format_board(node, player):
 # Single game
 # ---------------------------------------------------------------------------
 
-def play_one_game(game, katago, mcts_az, az_color, simulations, verbose):
+def play_one_game(game, katago, mcts_az, vpn, az_color, simulations, verbose):
     """
     Play one game.
       az_color: 1  → AlphaZero plays Black
                 -1 → AlphaZero plays White
-    Returns: (winner, num_moves, history)   winner: 1=Black, -1=White, 0=draw
+    Returns: (winner, num_moves)   winner: 1=Black, -1=White, 0=draw
     """
     katago.reset()
 
@@ -196,19 +224,28 @@ def play_one_game(game, katago, mcts_az, az_color, simulations, verbose):
     node = Node(prior_prob=0, player=player, action_index=None)
     node.set_state(game.state.copy())
     move_count = 0
-    history = []
+    # Board history in absolute form (Black=+1, White=-1), newest first.
+    # Boards BEFORE the current position — used to fill 17-plane history planes.
+    hist_boards_abs = []
 
     while True:
         result = game.winner(node.state, perspective=player)
         if result is not None:
-            return result, move_count, history
+            return result, move_count
         if move_count >= MAX_MOVES:
-            return game.get_winner(node.state, perspective=player), move_count, history
+            return game.get_winner(node.state, perspective=player), move_count
+
+        # Capture absolute board of current position before the move is made.
+        # Formula works uniformly: state * player = absolute (Black=+1, White=-1).
+        curr_abs_board = node.state[:NUM_POSITIONS].copy() * player
 
         gtp_color = "b" if player == 1 else "w"
 
         if player == az_color:
             # --- AlphaZero's turn ---
+            # Give the VPN the game history so _build_history can build correct
+            # per-leaf history by walking up the MCTS tree and then appending this.
+            vpn.set_history(hist_boards_abs)
             node = mcts_az.run_simulation(
                 root_node=node, num_simulations=simulations,
                 player=player, add_noise=False,
@@ -229,7 +266,7 @@ def play_one_game(game, katago, mcts_az, az_color, simulations, verbose):
                 except RuntimeError:
                     continue
             if action_index is None:
-                return -az_color, move_count, history  # all moves rejected; forfeit
+                return -az_color, move_count  # all moves rejected; forfeit
             if action_index in node.children:
                 node = node.children[action_index]
                 if node.state is None:
@@ -247,7 +284,7 @@ def play_one_game(game, katago, mcts_az, az_color, simulations, verbose):
             action_index = katago.genmove(gtp_color)
             if action_index is None:
                 # KataGo resigned — other player wins
-                return -player, move_count, history
+                return -player, move_count
             # Always recompute state: MCTS may have created this child node during
             # tree expansion with state=None (only visited leaves get state set).
             prev_state = node.state
@@ -264,17 +301,13 @@ def play_one_game(game, katago, mcts_az, az_color, simulations, verbose):
                 node = new_node
             who = "KG"
 
+        # Add the board before this move to history (it's now 1 step in the past).
+        hist_boards_abs = [curr_abs_board] + hist_boards_abs[:6]
+
         move_count += 1
-        color_name = "Black" if player == 1 else "White"
-        board_str = format_board(node, -player)  # node is now from the next player's view
-        history.append({
-            "move": move_count,
-            "who": who,
-            "color": color_name,
-            "gtp": az_to_gtp(action_index),
-            "board": board_str,
-        })
         if verbose:
+            color_name = "Black" if player == 1 else "White"
+            board_str = format_board(node, -player)
             print(f"  Move {move_count:3d}: {who} ({color_name}) → {az_to_gtp(action_index)}")
             print(board_str)
             print()
@@ -282,65 +315,6 @@ def play_one_game(game, katago, mcts_az, az_color, simulations, verbose):
         player *= -1
 
 
-# ---------------------------------------------------------------------------
-# Log writing
-# ---------------------------------------------------------------------------
-
-def write_game_log(filepath, game_logs, az_iter, katago_label, az_wins, kg_wins, draws, args):
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    with open(filepath, "w") as f:
-        f.write("=" * 70 + "\n")
-        f.write(f"KataGo vs AlphaZero — {BOARD_SIZE}x{BOARD_SIZE} Go\n")
-        f.write(f"  AlphaZero iter : {az_iter}  ({args.simulations} simulations/move)\n")
-        f.write(f"  KataGo model   : {katago_label}  ({args.katago_visits} visits/move)\n")
-        f.write(f"  Games          : {len(game_logs)}\n")
-        f.write("=" * 70 + "\n\n")
-
-        total = len(game_logs)
-        f.write(f"AlphaZero: {az_wins}/{total} wins ({az_wins/total*100:.0f}%)\n")
-        f.write(f"KataGo:    {kg_wins}/{total} wins ({kg_wins/total*100:.0f}%)\n")
-        if draws:
-            f.write(f"Draws:     {draws}\n")
-        f.write("\n")
-
-        for g in game_logs:
-            f.write("-" * 70 + "\n")
-            f.write(f"Game {g['game_num']:3d} | "
-                    f"Black: {g['black']:20s}  White: {g['white']:20s} | "
-                    f"{g['outcome']} ({g['num_moves']} moves)\n")
-            f.write("-" * 70 + "\n\n")
-            for m in g["history"]:
-                f.write(f"  Move {m['move']:3d}: {m['who']} ({m['color']}) → {m['gtp']}\n")
-                f.write(m["board"] + "\n\n")
-            f.write("\n")
-
-    print(f"Game log saved to: {filepath}")
-
-
-# ---------------------------------------------------------------------------
-# Graph
-# ---------------------------------------------------------------------------
-
-def create_results_graph(filepath, az_iter, katago_label, az_wins, kg_wins, draws, total):
-    """Save a bar chart PNG showing wins, losses, and draws."""
-    labels = [f"AZ-{az_iter}", f"KG-{katago_label}", "Draw"]
-    counts = [az_wins, kg_wins, draws]
-    colors = ["#4C72B0", "#DD8452", "#8C8C8C"]
-
-    fig, ax = plt.subplots(figsize=(6, 5))
-    bars = ax.bar(labels, counts, color=colors, edgecolor="white", linewidth=0.8)
-    for bar, cnt in zip(bars, counts):
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.1,
-                f"{cnt} ({cnt/total*100:.0f}%)", ha="center", va="bottom", fontsize=10)
-    ax.set_ylim(0, total * 1.15)
-    ax.set_ylabel("Games")
-    ax.set_title(f"KataGo ({katago_label}) vs AlphaZero (iter {az_iter}) — {total} games")
-
-    plt.tight_layout()
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    plt.savefig(filepath, dpi=130, bbox_inches="tight")
-    plt.close(fig)
-    print(f"Results graph saved to: {filepath}")
 
 
 # ---------------------------------------------------------------------------
@@ -353,22 +327,30 @@ def main():
                         help="Path to KataGo model.bin.gz (overrides --katago-iter)")
     parser.add_argument("--katago-iter", type=int, default=None,
                         help="KataGo sequential model number (e.g. 37 for katago_models_9x9/037/)")
+    parser.add_argument("--katago-elo", type=int, default=None,
+                        help="ELO of pretrained KataGo model in pretrained_katago_models/ "
+                             "(e.g. 482 for katago-elo-482.gz)")
     parser.add_argument("--az-iter", type=int, required=True,
                         help="AlphaZero model iteration number (e.g. 142)")
+    parser.add_argument("--az-model-dir", default=None,
+                        help="Directory containing AlphaZero checkpoints "
+                             "(default: cfg.SAVE_MODEL_PATH = models_9x9_base)")
     parser.add_argument("--games", type=int, default=10,
                         help="Number of games to play (default: 10)")
-    parser.add_argument("--simulations", type=int, default=200,
-                        help="MCTS simulations per move for AlphaZero (default: 200)")
-    parser.add_argument("--katago-visits", type=int, default=200,
-                        help="Search visits per move for KataGo (default: 200)")
+    parser.add_argument("--simulations", type=int, default=100,
+                        help="MCTS simulations per move for AlphaZero")
+    parser.add_argument("--katago-visits", type=int, default=10,
+                        help="Search visits per move for KataGo")
     parser.add_argument("--verbose", action="store_true",
                         help="Print every move and board state")
     args = parser.parse_args()
 
     if args.katago_model:
         katago_model = args.katago_model
+    elif args.katago_elo is not None:
+        katago_model = _find_katago_by_elo(args.katago_elo)
     elif args.katago_iter is not None:
-        folder = os.path.join(SCRIPT_DIR, "katago_models_9x9", f"{args.katago_iter:03d}")
+        folder = os.path.join(SCRIPT_DIR, "pretrained_katago_models_9x9", f"{args.katago_iter:03d}")
         katago_model = _find_katago_model(folder)
         if katago_model is None:
             raise FileNotFoundError(f"KataGo model not found in: {folder}")
@@ -377,12 +359,11 @@ def main():
     print(f"KataGo model : {katago_model}")
     print(f"AlphaZero    : iter {args.az_iter}")
     print(f"Games        : {args.games}")
-    print(f"AZ sims      : {args.simulations}    KataGo visits: {args.katago_visits}")
-    print(f"Board size   : {BOARD_SIZE}x{BOARD_SIZE}   Komi: {KOMI}")
     print()
 
+    az_model_dir = args.az_model_dir
     print("Loading AlphaZero model...", end=" ", flush=True)
-    vpn = load_az_model(args.az_iter)
+    vpn = load_az_model(args.az_iter, model_dir=az_model_dir)
     print("done")
 
     game = Go()
@@ -396,8 +377,7 @@ def main():
     kg_wins = 0
     draws = 0
     total_moves = 0
-    game_logs = []
-    katago_label = os.path.basename(os.path.dirname(katago_model))
+    katago_label = os.path.basename(katago_model).removesuffix(".gz")
 
     for i in range(args.games):
         # Alternate colours each game
@@ -414,17 +394,12 @@ def main():
         game.__init__()
         mcts_az = MonteCarloTreeSearch(game, vpn.get_vp, vpn.get_vp_batch)
 
-        winner, num_moves, history = play_one_game(
-            game, katago, mcts_az, az_color,
+        winner, num_moves = play_one_game(
+            game, katago, mcts_az, vpn, az_color,
             simulations=args.simulations,
             verbose=args.verbose,
         )
         total_moves += num_moves
-
-        az_label = f"AZ-{args.az_iter}"
-        kg_label = f"KG-{katago_label}"
-        black_label = az_label if az_color == 1 else kg_label
-        white_label = kg_label if az_color == 1 else az_label
 
         if winner == az_color:
             result_str = "AZ wins"
@@ -435,15 +410,6 @@ def main():
         else:
             result_str = "Draw"
             draws += 1
-
-        game_logs.append({
-            "game_num": i + 1,
-            "black": black_label,
-            "white": white_label,
-            "outcome": result_str,
-            "num_moves": num_moves,
-            "history": history,
-        })
 
         if args.verbose:
             print(f"Result: {result_str} ({num_moves} moves)\n{'='*50}\n")
@@ -458,21 +424,8 @@ def main():
     print(f"Results over {total} games")
     print(f"  AlphaZero (iter {args.az_iter}): {az_wins} wins ({az_wins/total*100:.0f}%)")
     print(f"  KataGo ({katago_label}): {kg_wins} wins ({kg_wins/total*100:.0f}%)")
-    if draws:
-        print(f"  Draws: {draws}")
-    print(f"  Avg moves/game: {total_moves/total:.1f}")
     print("=" * 40)
 
-    log_path = os.path.join(
-        SCRIPT_DIR, "test_output_9x9",
-        f"katago_{katago_label}_vs_az_{args.az_iter}.txt"
-    )
-    write_game_log(log_path, game_logs, args.az_iter, katago_label,
-                   az_wins, kg_wins, draws, args)
-
-    graph_path = log_path.replace(".txt", ".png")
-    create_results_graph(graph_path, args.az_iter, katago_label,
-                         az_wins, kg_wins, draws, total)
 
 
 if __name__ == "__main__":

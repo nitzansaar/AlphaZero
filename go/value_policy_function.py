@@ -3,7 +3,7 @@ from config import Config as cfg
 import torch
 import numpy as np
 from model import NeuralNetwork
-from game import board_to_canonical_3d
+from game import board_to_canonical_17, board_to_planes_17_with_history, NUM_POSITIONS
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -17,6 +17,7 @@ class ValuePolicyNetwork:
     def __init__(self, path=None, use_compile=True):
         self.original_model = NeuralNetwork().to(device)
         self.model_path = path  # kept so parallel workers can reload the model
+        self._game_hist = []  # game-level history set by set_history()
 
         if path:
             try:
@@ -49,23 +50,58 @@ class ValuePolicyNetwork:
         else:
             self.model = self.original_model
 
-    def get_vp(self, state, player=1):
+    def set_history(self, hist_boards_abs):
+        """
+        Set the game-level board history (boards before the current root position).
+
+        Args:
+            hist_boards_abs: List of absolute boards (Black=+1, White=-1),
+                             newest first, capturing positions before the root.
+        """
+        self._game_hist = list(hist_boards_abs)
+
+    def _build_history(self, node):
+        """
+        Build up to 7 prior absolute boards for a leaf node.
+
+        Walks the parent chain (newest first) then falls back to _game_hist.
+
+        Args:
+            node: MCTS leaf node being evaluated.
+
+        Returns:
+            List of up to 7 absolute boards (Black=+1, White=-1), newest first.
+        """
+        hist = []
+        ancestor = node.parent if node is not None else None
+        while ancestor is not None and len(hist) < 7:
+            if ancestor.state is not None:
+                abs_board = ancestor.state[:NUM_POSITIONS] * ancestor.player
+                hist.append(abs_board)
+            ancestor = ancestor.parent
+        remaining = 7 - len(hist)
+        hist.extend(self._game_hist[:remaining])
+        return hist
+
+    def get_vp(self, state, player=1, node=None):
         """
         Get value and policy predictions for a board state.
 
         Args:
-            state: Game state array (27 values: 25 board + ko + passes)
-            player: Current player (1 or -1) for canonical representation
+            state: Game state array in absolute form (Black=+1, White=-1)
+            player: Current player (1=Black, -1=White)
+            node: Optional MCTS node; when provided, history is built from the
+                  parent chain + _game_hist for full 17-plane input.
 
         Returns:
             value: Position evaluation (float)
-            policy: Move probabilities (array of 26 values: 25 positions + pass)
+            policy: Move probabilities (array of ACTION_SIZE values)
         """
-        # Convert to canonical 3-plane representation
-        canonical_state = board_to_canonical_3d(state, player)
+        hist = self._build_history(node) if node is not None else []
+        planes = board_to_planes_17_with_history(state, player, hist)
 
-        # Convert to tensor and add batch dimension: (3, 5, 5) -> (1, 3, 5, 5)
-        state_tensor = torch.from_numpy(canonical_state).unsqueeze(0).to(device)
+        # Convert to tensor and add batch dimension: (17, B, B) -> (1, 17, B, B)
+        state_tensor = torch.from_numpy(planes).unsqueeze(0).to(device)
 
         with torch.no_grad():
             value, policy = self.model(state_tensor)
@@ -76,29 +112,37 @@ class ValuePolicyNetwork:
 
         return value, policy
 
-    def get_vp_batch(self, states, players):
+    def get_vp_batch(self, states, players, nodes=None):
         """
         Get value and policy predictions for multiple board states in a single batch.
         Much more efficient for GPU utilization than calling get_vp multiple times.
 
         Args:
-            states: List of game state arrays (each 27 values: 25 board + ko + passes)
+            states: List of game state arrays in absolute form
             players: List of current players (1 or -1) for each state
+            nodes: Optional list of MCTS nodes; when provided, per-leaf history
+                   is built from the parent chain + _game_hist.
 
         Returns:
             values: List of position evaluations (floats)
-            policies: List of move probability arrays (each 26 values)
+            policies: List of move probability arrays
         """
         if len(states) == 0:
             return [], []
 
-        # Convert all states to canonical 3-plane representation
-        canonical_states = np.stack([
-            board_to_canonical_3d(state, player)
-            for state, player in zip(states, players)
-        ])
+        # Convert all states to 17-plane representation (with history if available)
+        if nodes is not None:
+            canonical_states = np.stack([
+                board_to_planes_17_with_history(state, player, self._build_history(node))
+                for state, player, node in zip(states, players, nodes)
+            ])
+        else:
+            canonical_states = np.stack([
+                board_to_planes_17_with_history(state, player, [])
+                for state, player in zip(states, players)
+            ])
 
-        # Convert to tensor: (batch, 3, 5, 5)
+        # Convert to tensor: (batch, 17, B, B)
         state_tensor = torch.from_numpy(canonical_states).to(device)
 
         with torch.no_grad():
