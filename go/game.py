@@ -28,6 +28,65 @@ def board_to_canonical_3d(board_flat, player):
     return planes
 
 
+def board_to_canonical_17(board_flat, player):
+    """
+    Convert flat board state to AlphaZero 17-plane representation (no history).
+
+    Matches the encoding used by go_board_to_planes_17() in go_engine.c when
+    called with n_hist=1 (current board only, history planes zeroed out).
+
+    Args:
+        board_flat: Flat array of NUM_POSITIONS values in absolute form
+                    (1=Black, -1=White, 0=empty), as stored in game.state
+        player: Current player in absolute form (1=Black, -1=White)
+
+    Returns:
+        17-plane numpy array of shape (17, BOARD_SIZE, BOARD_SIZE):
+        - Plane 0:    Current player's stones on the current board
+        - Planes 1-7: Prior boards (zeroed — no history available)
+        - Plane 8:    Opponent's stones on the current board
+        - Planes 9-15: Prior opponent boards (zeroed — no history available)
+        - Plane 16:   Color-to-play (1.0 if player == 1 / Black, else 0.0)
+    """
+    board_2d = np.array(board_flat[:NUM_POSITIONS]).reshape(BOARD_SIZE, BOARD_SIZE)
+
+    planes = np.zeros((17, BOARD_SIZE, BOARD_SIZE), dtype=np.float32)
+    planes[0]  = (board_2d == player).astype(np.float32)   # current player's stones
+    planes[8]  = (board_2d == -player).astype(np.float32)  # opponent's stones
+    planes[16] = 1.0 if player == 1 else 0.0               # color-to-play
+
+    return planes
+
+
+def board_to_planes_17_with_history(board_flat, player, hist_boards_abs):
+    """
+    Build a 17-plane tensor with full board history.
+
+    Args:
+        board_flat:       Current board in absolute form (1=Black, -1=White, 0=empty),
+                          length >= NUM_POSITIONS.
+        player:           Player to move (1=Black, -1=White).
+        hist_boards_abs:  List of up to 7 previous absolute boards, newest first.
+                          Shorter lists are zero-padded (older slots stay 0).
+
+    Returns:
+        numpy array (17, BOARD_SIZE, BOARD_SIZE) float32.
+        Planes 0-7:  current-player stones (current board, then history newest→oldest).
+        Planes 8-15: opponent stones (same ordering).
+        Plane 16:    color-to-play (1.0 if Black, 0.0 if White).
+    """
+    planes = np.zeros((17, BOARD_SIZE, BOARD_SIZE), dtype=np.float32)
+    board_2d = np.array(board_flat[:NUM_POSITIONS]).reshape(BOARD_SIZE, BOARD_SIZE)
+    planes[0] = (board_2d == player).astype(np.float32)
+    planes[8] = (board_2d == -player).astype(np.float32)
+    for i, hist_board in enumerate(hist_boards_abs[:7]):
+        h = np.array(hist_board[:NUM_POSITIONS]).reshape(BOARD_SIZE, BOARD_SIZE)
+        planes[1 + i] = (h == player).astype(np.float32)
+        planes[9 + i] = (h == -player).astype(np.float32)
+    planes[16] = 1.0 if player == 1 else 0.0
+    return planes
+
+
 def idx_to_coord(idx):
     """Convert flat index to (row, col) coordinates."""
     return idx // BOARD_SIZE, idx % BOARD_SIZE

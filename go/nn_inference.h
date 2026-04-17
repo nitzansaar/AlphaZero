@@ -42,8 +42,8 @@ public:
      * Batched neural-network evaluation.  Signature matches NNEvalFn so
      * a thin static wrapper (see header comment) can serve as the callback.
      *
-     *   planes   : batch_size × 3 × NUM_POSITIONS floats in row-major order
-     *              (canonical form produced by go_board_to_planes with player=1)
+     *   planes   : batch_size × 17 × NUM_POSITIONS floats in row-major order
+     *              (AlphaZero 17-plane form produced by go_board_to_planes_17)
      *   values   : [out] batch_size scalars in [-1, 1]  (value head, tanh)
      *   policies : [out] batch_size × ACTION_SIZE softmax probabilities
      *              (softmax applied here; NN output is raw logits)
