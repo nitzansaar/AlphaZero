@@ -69,9 +69,6 @@ class Config5x5:
     TEMP_THRESHOLD = 6
     INITIAL_TEMP = 1.0
 
-    # Minimum move number before pass is allowed in C++ selfplay.
-    MIN_PASS_MOVE = 15
-
     # Data augmentation
     USE_AUGMENTATION = True
 
@@ -114,7 +111,7 @@ class Config9x9Base:
     LEARNING_RATE = 0.001  # SGD LR
     WEIGHT_DECAY = 1e-4
     MOMENTUM = 0.9
-    LR_DECAY_ITERS = [30, 60]
+    LR_DECAY_ITERS = [30, 60, 200, 400, 700]
     LR_DECAY_FACTOR = 0.1
 
     # MCTS settings
@@ -143,10 +140,6 @@ class Config9x9Base:
     # Temperature for exploration
     TEMP_THRESHOLD = 15  # Opening moves with temp=1; rest greedy (~17% of ~90-move game)
     INITIAL_TEMP = 1.0
-
-    # Minimum move number before pass is allowed in C++ selfplay.
-    # Prevents komi exploitation (model learning to pass immediately as White).
-    MIN_PASS_MOVE = 30
 
     # Data augmentation
     USE_AUGMENTATION = True

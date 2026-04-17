@@ -66,10 +66,12 @@ class Trainer:
                         self.original_model.load_state_dict(loaded_state)
                         print("Model successfully loaded from {}".format(latest_file))
                     except RuntimeError as e:
-                        print("Warning: Could not load model (architecture mismatch)")
-                        print("This is expected if the model was trained with old architecture.")
-                        print("Starting with new randomly initialized model")
-                        self.latest_file_number = -1  # Start fresh
+                        raise RuntimeError(
+                            f"Cannot load latest checkpoint '{latest_file}': {e}\n"
+                            "Refusing to overwrite existing checkpoints with a freshly "
+                            "initialised model.  Delete or rename the corrupt checkpoint "
+                            "to start a new run from scratch."
+                        ) from e
             else:
                 savepath = os.path.join(cfg.SAVE_MODEL_PATH,cfg.BEST_MODEL.format(self.latest_file_number))
                 torch.save(self.original_model.state_dict(), savepath)
@@ -162,8 +164,8 @@ class Trainer:
             nesterov=True,
         )
 
-        # Mixed precision training for RTX 5090 (faster training, less memory)
-        scaler = GradScaler('cuda')
+        # Mixed precision training (AMP); falls back to no-op on CPU.
+        scaler = GradScaler(device)
 
         history = []
 
@@ -182,7 +184,7 @@ class Trainer:
                 p = p.to(device, non_blocking=True)
 
             with timer.track("forward_pass"):
-                with autocast('cuda'):
+                with autocast(device):
                     yv, yp = self.model(X)
                     vloss = value_criterion(yv.squeeze(-1), v)
                     aloss = policy_criterion(yp, p)

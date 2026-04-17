@@ -5,7 +5,7 @@ from copy import copy
 from config import Config as cfg
 import random
 from game import board_to_canonical_3d
-from augmentation import augment_data, get_augmentations
+from augmentation import augment_data, augment_data_17plane, get_augmentations
 
 class GoDataset:
     def __init__(self, dataset, use_augmentation=False):
@@ -47,19 +47,30 @@ class GoDataset:
         return self.values.shape[0]
 
     def __getitem__(self, index):
-        # Apply data augmentation with 50% probability.
-        # Only applies to legacy flat-board states; 17-plane pre-computed states skip it.
         state_raw = self.states_flat[index]
         is_precomputed_3d = isinstance(state_raw, np.ndarray) and state_raw.ndim == 3
-        if self.use_augmentation and not is_precomputed_3d and random.random() < 0.5:
-            transform_type = random.choice(self.augmentations)
-            state_flat, p = augment_data(state_raw, self.policies[index].numpy(), transform_type)
-            state_canonical = board_to_canonical_3d(state_flat, self.players[index])
-            return (torch.from_numpy(state_canonical),
-                    self.values[index],
-                    torch.from_numpy(np.array(p, dtype=np.float32)))
 
-        # Non-augmented: return precomputed tensors directly
+        if self.use_augmentation and random.random() < 0.5:
+            transform_type = random.choice(self.augmentations)
+            if is_precomputed_3d:
+                # 17-plane C++ selfplay data — augment all planes in one call.
+                aug_state, aug_p = augment_data_17plane(
+                    state_raw, self.policies[index].numpy(), transform_type
+                )
+                return (torch.from_numpy(aug_state.astype(np.float32)),
+                        self.values[index],
+                        torch.from_numpy(aug_p.astype(np.float32)))
+            else:
+                # Legacy flat-board Python selfplay data.
+                state_flat, aug_p = augment_data(
+                    state_raw, self.policies[index].numpy(), transform_type
+                )
+                state_canonical = board_to_canonical_3d(state_flat, self.players[index])
+                return (torch.from_numpy(state_canonical),
+                        self.values[index],
+                        torch.from_numpy(np.array(aug_p, dtype=np.float32)))
+
+        # Non-augmented: return precomputed tensors directly.
         return (self.canonical[index],
                 self.values[index],
                 self.policies[index])

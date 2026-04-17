@@ -77,7 +77,6 @@ struct Config {
     std::string output_dir  = ".";
     int      temp_moves     = 15;   /* high-temp (explore) moves per game */
     int      max_moves      = 100;  /* force-end if game exceeds this     */
-    int      min_pass_move  = 30;   /* pass forbidden before this move #  */
     uint32_t seed           = 42;
 };
 
@@ -95,7 +94,6 @@ static void print_usage(const char *prog)
             "  --output DIR     output directory          (default: .)\n"
             "  --temp-moves N   high-temp moves per game  (default: 15)\n"
             "  --max-moves N    max moves before force end(default: 100)\n"
-            "  --min-pass-move N pass forbidden before move N(default: 30)\n"
             "  --seed N         base RNG seed             (default: 42)\n"
             "\n"
             "Output files in DIR:\n"
@@ -117,10 +115,9 @@ static bool parse_args(int argc, char *argv[], Config &cfg)
         else if (strcmp(argv[i], "--threads")   == 0 && i+1 < argc) cfg.num_threads = atoi(argv[++i]);
         else if (strcmp(argv[i], "--cuda")      == 0)                cfg.use_cuda    = true;
         else if (strcmp(argv[i], "--output")    == 0 && i+1 < argc) cfg.output_dir  = argv[++i];
-        else if (strcmp(argv[i], "--temp-moves")   == 0 && i+1 < argc) cfg.temp_moves    = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--max-moves")    == 0 && i+1 < argc) cfg.max_moves     = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--min-pass-move")== 0 && i+1 < argc) cfg.min_pass_move = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--seed")         == 0 && i+1 < argc) cfg.seed          = (uint32_t)atoi(argv[++i]);
+        else if (strcmp(argv[i], "--temp-moves")   == 0 && i+1 < argc) cfg.temp_moves = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--max-moves")    == 0 && i+1 < argc) cfg.max_moves  = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--seed")         == 0 && i+1 < argc) cfg.seed       = (uint32_t)atoi(argv[++i]);
         else {
             fprintf(stderr, "Unknown argument: %s\n", argv[i]);
             return false;
@@ -174,19 +171,6 @@ static void play_one_game(NodePool        *pool,
         auto ts = Clock::now();
         float temp = (move_count < cfg.temp_moves) ? 1.0f : 0.1f;
         int action = mcts_select_move(pool, temp, step.probs);
-
-        /* Suppress pass before min_pass_move to prevent komi exploitation. */
-        if (action == PASS_ACTION && move_count < cfg.min_pass_move) {
-            step.probs[PASS_ACTION] = 0.0f;
-            float total = 0.0f;
-            for (int i = 0; i < ACTION_SIZE; i++) total += step.probs[i];
-            if (total > 0.0f)
-                for (int i = 0; i < ACTION_SIZE; i++) step.probs[i] /= total;
-            /* Pick best non-pass action by greedy argmax. */
-            action = 0;
-            for (int i = 1; i < PASS_ACTION; i++)
-                if (step.probs[i] > step.probs[action]) action = i;
-        }
         t.move_selection += Dsec(Clock::now() - ts).count();
 
         steps.push_back(step);
@@ -308,7 +292,6 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Output    : %s\n", cfg.output_dir.c_str());
     fprintf(stderr, "TempMoves : %d\n", cfg.temp_moves);
     fprintf(stderr, "MaxMoves  : %d\n", cfg.max_moves);
-    fprintf(stderr, "MinPassMove: %d\n", cfg.min_pass_move);
     fprintf(stderr, "\n");
 
     std::vector<float> all_states, all_policies, all_values;
