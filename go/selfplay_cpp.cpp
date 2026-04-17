@@ -2,7 +2,7 @@
  * selfplay_cpp.cpp — AlphaZero-style self-play data generator.
  *
  * Produces three .npy files in an output directory:
- *   states.npy    float32 (N, 3, 9, 9)  canonical board planes
+ *   states.npy    float32 (N, 17, 9, 9) AlphaZero 17-plane board representation
  *   policies.npy  float32 (N, 82)       MCTS visit-count probabilities
  *   values.npy    float32 (N,)          game outcome from each position's player
  *
@@ -99,7 +99,7 @@ static void print_usage(const char *prog)
             "  --seed N         base RNG seed             (default: 42)\n"
             "\n"
             "Output files in DIR:\n"
-            "  states.npy    (N, 3, 9, 9)  canonical board planes\n"
+            "  states.npy    (N, 17, 9, 9) AlphaZero 17-plane board representation\n"
             "  policies.npy  (N, 82)       MCTS visit probabilities\n"
             "  values.npy    (N,)          game outcome per position\n",
             prog);
@@ -132,9 +132,9 @@ static bool parse_args(int argc, char *argv[], Config &cfg)
 /* ── Game data structures ─────────────────────────────────────────────── */
 
 struct Step {
-    float planes[3 * NUM_POSITIONS]; /* canonical board planes           */
-    float probs[ACTION_SIZE];         /* MCTS visit-count probabilities   */
-    int   absolute_player;            /* +1 Black / -1 White              */
+    float planes[17 * NUM_POSITIONS]; /* AlphaZero 17-plane representation */
+    float probs[ACTION_SIZE];          /* MCTS visit-count probabilities    */
+    int   absolute_player;             /* +1 Black / -1 White               */
 };
 
 /* ── Single-game self-play ────────────────────────────────────────────── */
@@ -158,9 +158,9 @@ static void play_one_game(NodePool        *pool,
         Step step;
         step.absolute_player = absolute_player;
 
-        /* Canonical planes: current player (in canonical state) = +1. */
+        /* 17-plane input: current player (canonical state = +1). */
         auto tp = Clock::now();
-        go_board_to_planes(&state, 1, absolute_player, step.planes);
+        go_board_to_planes_17(&state, 1, absolute_player, step.planes);
         t.state_copy += Dsec(Clock::now() - tp).count();
 
         /* MCTS from this position. */
@@ -219,7 +219,7 @@ static void play_one_game(NodePool        *pool,
                     : (winner == s.absolute_player) ? 1.0f : -1.0f;
 
         out_states.insert(out_states.end(),
-                          s.planes, s.planes + 3 * NUM_POSITIONS);
+                          s.planes, s.planes + 17 * NUM_POSITIONS);
         out_policies.insert(out_policies.end(),
                             s.probs, s.probs + ACTION_SIZE);
         out_values.push_back(value);
@@ -248,7 +248,7 @@ static void worker(int                  thread_id,
     NodePool *pool = new NodePool;
 
     std::vector<float> local_states, local_policies, local_values;
-    local_states.reserve((size_t)(num_games * 80 * 3 * NUM_POSITIONS));
+    local_states.reserve((size_t)(num_games * 80 * 17 * NUM_POSITIONS));
     local_policies.reserve((size_t)(num_games * 80 * ACTION_SIZE));
     local_values.reserve((size_t)(num_games * 80));
 
@@ -344,12 +344,12 @@ int main(int argc, char *argv[])
     int N = (int)all_values.size();
     fprintf(stderr, "\nTotal positions: %d\n", N);
 
-    /* states.npy — (N, 3, 9, 9) */
+    /* states.npy — (N, 17, 9, 9) */
     {
         std::string path = cfg.output_dir + "/states.npy";
-        int dims[] = {N, 3, BOARD_SIZE, BOARD_SIZE};
+        int dims[] = {N, 17, BOARD_SIZE, BOARD_SIZE};
         if (npy_write_float32(path.c_str(), all_states.data(),
-                              N * 3 * NUM_POSITIONS, 4, dims) != 0) {
+                              N * 17 * NUM_POSITIONS, 4, dims) != 0) {
             fprintf(stderr, "ERROR: failed to write %s\n", path.c_str());
             return 1;
         }

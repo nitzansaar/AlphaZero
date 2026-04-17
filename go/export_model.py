@@ -42,7 +42,7 @@ def main():
 
     # Quick sanity check
     with torch.no_grad():
-        dummy = torch.zeros(1, 3, model.board_size, model.board_size)
+        dummy = torch.zeros(1, 17, model.board_size, model.board_size)
         v, p = scripted(dummy)
         assert v.shape == (1, 1), f"unexpected value shape {v.shape}"
         assert p.shape[0] == 1,   f"unexpected policy shape {p.shape}"

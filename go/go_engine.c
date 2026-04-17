@@ -356,6 +356,27 @@ void go_board_to_planes(const GoState *state, int player, int absolute_player,
         plane2[i] = color_val;
 }
 
+void go_board_to_planes_17(const GoState *state, int player, int absolute_player,
+                            float *planes_out)
+{
+    /* Zero all 17 planes first (history planes stay zero). */
+    for (int i = 0; i < 17 * NUM_POSITIONS; i++)
+        planes_out[i] = 0.0f;
+
+    float *plane0  = planes_out;                      /* current-player stones */
+    float *plane8  = planes_out + 8  * NUM_POSITIONS; /* opponent stones       */
+    float *plane16 = planes_out + 16 * NUM_POSITIONS; /* color-to-play         */
+
+    for (int i = 0; i < NUM_POSITIONS; i++) {
+        int canonical = (int)state->board[i] * player;
+        plane0[i] = (canonical ==  1) ? 1.0f : 0.0f;
+        plane8[i] = (canonical == -1) ? 1.0f : 0.0f;
+    }
+    float color_val = (absolute_player == 1) ? 1.0f : 0.0f;
+    for (int i = 0; i < NUM_POSITIONS; i++)
+        plane16[i] = color_val;
+}
+
 /* ── Debug render ─────────────────────────────────────────────────────── */
 
 void go_render(const GoState *state)

@@ -1,0 +1,8 @@
+{
+  "timings": {
+    "mcts_simulation": 7.027355,
+    "move_selection": 0.000313,
+    "state_copy": 0.000248,
+    "winner_check": 0.000002
+  }
+}

@@ -23,7 +23,7 @@ extern "C" {
 #define NUM_POSITIONS 81        /* 9 * 9 */
 #define PASS_ACTION   81
 #define ACTION_SIZE   82        /* 81 positions + 1 pass */
-#define KOMI          6f      /* standard 9x9 komi */
+#define KOMI          6.0f    /* standard 9x9 komi */
 
 /* ── Game state ───────────────────────────────────────────────────────── */
 
@@ -119,7 +119,7 @@ int go_get_winner(const GoState *state, int perspective);
 /* ── Neural-network input ─────────────────────────────────────────────── */
 
 /*
- * Convert state to the 3-plane float representation expected by the NN.
+ * Convert state to the 3-plane float representation.
  * planes_out must hold 3 * NUM_POSITIONS floats, laid out as:
  *   [0 .. NUM_POSITIONS-1]        plane 0: current-player stones
  *   [NUM_POSITIONS .. 2N-1]       plane 1: opponent stones
@@ -131,6 +131,24 @@ int go_get_winner(const GoState *state, int perspective);
  */
 void go_board_to_planes(const GoState *state, int player, int absolute_player,
                         float *planes_out);
+
+/*
+ * Convert state to the AlphaZero 17-plane float representation used by the NN.
+ * planes_out must hold 17 * NUM_POSITIONS floats.
+ *
+ * Layout (matches board_to_canonical_17 in game.py and Python training):
+ *   Planes  0-7 : current-player stones (plane 0 = current board;
+ *                 planes 1-7 = history boards, zeroed — no history available)
+ *   Planes  8-15: opponent stones        (plane 8 = current board;
+ *                 planes 9-15 = history, zeroed)
+ *   Plane  16   : color-to-play — 1.0 if absolute_player == +1 (Black),
+ *                                  0.0 if absolute_player == -1 (White)
+ *
+ * player:          canonical perspective (pass 1 for canonical-form states)
+ * absolute_player: +1 = Black to move, -1 = White to move
+ */
+void go_board_to_planes_17(const GoState *state, int player, int absolute_player,
+                            float *planes_out);
 
 /* ── Debug ────────────────────────────────────────────────────────────── */
 

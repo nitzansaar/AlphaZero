@@ -74,8 +74,8 @@ struct NodePool {
 
 /* ── Neural-network evaluation callback ──────────────────────────────────
  *
- * planes:     batch_size × 3 × NUM_POSITIONS floats (canonical board planes
- *             produced by go_board_to_planes with player=1)
+ * planes:     batch_size × 17 × NUM_POSITIONS floats (AlphaZero 17-plane form
+ *             produced by go_board_to_planes_17 with player=1)
  * batch_size: number of boards in the batch
  * values:     [out] batch_size floats  (scalar value in [-1, 1])
  * policies:   [out] batch_size × ACTION_SIZE floats (softmax probabilities)
