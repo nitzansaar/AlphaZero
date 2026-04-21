@@ -11,7 +11,7 @@
  *   NodePool *pool = new NodePool;
  *   GoState s = go_initial_state();
  *   mcts_init_root(pool, &s, 1);          // player 1 = Black
- *   mcts_simulate(pool, my_nn, 800, 32, true);
+ *   mcts_simulate(pool, my_nn, 800, 32, true, nullptr, 0);
  *   float probs[ACTION_SIZE];
  *   int action = mcts_select_move(pool, 1.0f, probs);
  */
@@ -21,9 +21,12 @@
 /* ── Compile-time limits ──────────────────────────────────────────────── */
 
 /* Maximum nodes in the pool.
- * Worst case: 1 (root) + 82 (root children) + 800 sims × 82 children
- * per expansion = 65,683.  100k gives a safe margin. */
-#define NODE_POOL_SIZE  100000
+ * Worst case: 1 + ACTION_SIZE + NUM_SIMULATIONS * ACTION_SIZE.
+ * 9x9 at 800 sims: 65,683 → 100k.  19x19 at 400 sims: 145,163 → 200k.
+ * Override at compile time: -DNODE_POOL_SIZE=200000 */
+#ifndef NODE_POOL_SIZE
+#  define NODE_POOL_SIZE  100000
+#endif
 
 /* Maximum batch_size argument to mcts_simulate. */
 #define MAX_BATCH_SIZE  64
@@ -75,7 +78,7 @@ struct NodePool {
 /* ── Neural-network evaluation callback ──────────────────────────────────
  *
  * planes:     batch_size × 17 × NUM_POSITIONS floats (AlphaZero 17-plane form
- *             produced by go_board_to_planes_17 with player=1)
+ *             produced by go_board_to_planes_17_with_history)
  * batch_size: number of boards in the batch
  * values:     [out] batch_size floats  (scalar value in [-1, 1])
  * policies:   [out] batch_size × ACTION_SIZE floats (softmax probabilities)
@@ -100,9 +103,13 @@ int mcts_init_root(NodePool *pool, const GoState *state, int player);
  *   num_simulations total number of simulations to run
  *   batch_size      leaves to collect per NN call (must be ≤ MAX_BATCH_SIZE)
  *   add_noise       add Dirichlet noise to root child priors (training only)
+ *   game_hist       canonical GoState history: [0]=root, [1]=1 move ago, ...
+ *                   Pass nullptr/0 to use only tree-depth history.
+ *   game_hist_len   number of valid entries in game_hist (0..8)
  */
 void mcts_simulate(NodePool *pool, NNEvalFn nn_fn,
-                   int num_simulations, int batch_size, bool add_noise);
+                   int num_simulations, int batch_size, bool add_noise,
+                   const GoState *game_hist = nullptr, int game_hist_len = 0);
 
 /*
  * Select a move from root using temperature-weighted visit counts.

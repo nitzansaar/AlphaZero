@@ -2,9 +2,9 @@
  * selfplay_cpp.cpp — AlphaZero-style self-play data generator.
  *
  * Produces three .npy files in an output directory:
- *   states.npy    float32 (N, 17, 9, 9) AlphaZero 17-plane board representation
- *   policies.npy  float32 (N, 82)       MCTS visit-count probabilities
- *   values.npy    float32 (N,)          game outcome from each position's player
+ *   states.npy    float32 (N, 17, BOARD_SIZE, BOARD_SIZE)  AlphaZero 17-plane repr
+ *   policies.npy  float32 (N, ACTION_SIZE)                  MCTS visit-count probs
+ *   values.npy    float32 (N,)                              game outcome per position
  *
  * Usage:
  *   selfplay_cpp <model_ts.pt> [options]
@@ -32,6 +32,8 @@
 #include <thread>
 #include <mutex>
 #include <chrono>
+#include <random>
+#include <deque>
 
 /* ── Timing ───────────────────────────────────────────────────────────── */
 
@@ -70,14 +72,17 @@ static void nn_callback(const float *planes, int batch_size,
 struct Config {
     std::string model_path;
     int      num_games      = 100;
-    int      num_sims       = 800;
+    int      num_sims       = 600;
     int      batch_size     = 32;
     int      num_threads    = 1;
     bool     use_cuda       = false;
     std::string output_dir  = ".";
-    int      temp_moves     = 15;   /* high-temp (explore) moves per game */
-    int      max_moves      = 100;  /* force-end if game exceeds this     */
+    int      temp_moves     = 30;   /* high-temp (explore) moves per game */
+    int      max_moves      = 350;  /* force-end if game exceeds this     */
     uint32_t seed           = 42;
+    /* Playout cap randomization */
+    float    full_prob      = 0.25f; /* fraction of turns that use full search */
+    int      fast_sims      = 100;  /* simulation budget for non-training (fast) turns       */
 };
 
 static void print_usage(const char *prog)
@@ -95,11 +100,13 @@ static void print_usage(const char *prog)
             "  --temp-moves N   high-temp moves per game  (default: 15)\n"
             "  --max-moves N    max moves before force end(default: 100)\n"
             "  --seed N         base RNG seed             (default: 42)\n"
+            "  --full-prob F    fraction of turns w/ full search (default: 1.0 = disabled)\n"
+            "  --fast-sims N    sims for non-training turns       (default: 100)\n"
             "\n"
             "Output files in DIR:\n"
-            "  states.npy    (N, 17, 9, 9) AlphaZero 17-plane board representation\n"
-            "  policies.npy  (N, 82)       MCTS visit probabilities\n"
-            "  values.npy    (N,)          game outcome per position\n",
+            "  states.npy    (N, 17, BOARD_SIZE, BOARD_SIZE)  AlphaZero 17-plane repr\n"
+            "  policies.npy  (N, ACTION_SIZE)                  MCTS visit probabilities\n"
+            "  values.npy    (N,)                              game outcome per position\n",
             prog);
 }
 
@@ -118,6 +125,8 @@ static bool parse_args(int argc, char *argv[], Config &cfg)
         else if (strcmp(argv[i], "--temp-moves")   == 0 && i+1 < argc) cfg.temp_moves = atoi(argv[++i]);
         else if (strcmp(argv[i], "--max-moves")    == 0 && i+1 < argc) cfg.max_moves  = atoi(argv[++i]);
         else if (strcmp(argv[i], "--seed")         == 0 && i+1 < argc) cfg.seed       = (uint32_t)atoi(argv[++i]);
+        else if (strcmp(argv[i], "--full-prob")    == 0 && i+1 < argc) cfg.full_prob   = (float)atof(argv[++i]);
+        else if (strcmp(argv[i], "--fast-sims")    == 0 && i+1 < argc) cfg.fast_sims   = atoi(argv[++i]);
         else {
             fprintf(stderr, "Unknown argument: %s\n", argv[i]);
             return false;
@@ -127,7 +136,7 @@ static bool parse_args(int argc, char *argv[], Config &cfg)
 }
 
 /* ── Game data structures ─────────────────────────────────────────────── */
-
+// step is one training example
 struct Step {
     float planes[17 * NUM_POSITIONS]; /* AlphaZero 17-plane representation */
     float probs[ACTION_SIZE];          /* MCTS visit-count probabilities    */
@@ -136,12 +145,13 @@ struct Step {
 
 /* ── Single-game self-play ────────────────────────────────────────────── */
 
-static void play_one_game(NodePool        *pool,
-                          const Config    &cfg,
+static void play_one_game(NodePool           *pool,
+                          const Config       &cfg,
                           std::vector<float> &out_states,
                           std::vector<float> &out_policies,
                           std::vector<float> &out_values,
-                          Timings         &t)
+                          std::mt19937       &coin_rng,
+                          Timings            &t)
 {
     std::vector<Step> steps;
     steps.reserve((size_t)cfg.max_moves);
@@ -150,30 +160,52 @@ static void play_one_game(NodePool        *pool,
     int absolute_player = 1;   /* Black (absolute) moves first */
     int move_count      = 0;
 
+    /* History ring: [0]=current, [1]=1 move ago, ..., capped at 8 entries. */
+    std::deque<GoState> hist;
+
     while (!go_game_ended(&state) && move_count < cfg.max_moves) {
 
         Step step;
         step.absolute_player = absolute_player;
 
-        /* 17-plane input: current player (canonical state = +1). */
+        /* Playout cap randomization: decide full vs fast search for this turn.
+         * full_prob=1.0 means every turn is full — feature is disabled. */
+        std::bernoulli_distribution full_dist(cfg.full_prob);
+        bool is_full_search = full_dist(coin_rng);
+        int  sims = is_full_search ? cfg.num_sims : cfg.fast_sims;
+
+        /* 17-plane input with full move history. */
         auto tp = Clock::now();
-        go_board_to_planes_17(&state, 1, absolute_player, step.planes);
+        hist.push_front(state);
+        if ((int)hist.size() > 8) hist.pop_back();
+        GoState hist_arr[8];
+        int nhist = (int)hist.size();
+        for (int h = 0; h < nhist; h++) hist_arr[h] = hist[h];
+        go_board_to_planes_17_with_history(hist_arr, nhist, absolute_player, step.planes);
         t.state_copy += Dsec(Clock::now() - tp).count();
 
-        /* MCTS from this position. */
+        /* MCTS from this position.
+         * Dirichlet noise is only added on full-search turns; fast turns run
+         * greedier search purely to advance the game state cheaply. */
         auto tm = Clock::now();
         mcts_init_root(pool, &state, absolute_player);
         mcts_simulate(pool, nn_callback,
-                      cfg.num_sims, cfg.batch_size, /*add_noise=*/true);
+                      sims, cfg.batch_size, /*add_noise=*/is_full_search,
+                      hist_arr, nhist);
         t.mcts_simulation += Dsec(Clock::now() - tm).count();
 
-        /* Temperature schedule mirrors selfplay.py. */
+        /* Temperature schedule mirrors selfplay.py (unchanged for both turn types). */
         auto ts = Clock::now();
         float temp = (move_count < cfg.temp_moves) ? 1.0f : 0.1f;
         int action = mcts_select_move(pool, temp, step.probs);
         t.move_selection += Dsec(Clock::now() - ts).count();
 
-        steps.push_back(step);
+        /* Only record full-search turns as training data.
+         * Fast-search visit distributions are too shallow to be reliable
+         * policy targets, so excluding them improves training signal quality. */
+        if (is_full_search) {
+            steps.push_back(step);
+        }
 
         /* Advance canonical state; player flips. */
         auto ta = Clock::now();
@@ -228,6 +260,10 @@ static void worker(int                  thread_id,
     /* Distinct RNG stream per thread. */
     mcts_seed_rng(cfg.seed + (uint32_t)thread_id * 1000u);
 
+    /* Separate RNG for the per-move full/fast coin flip — offset from the MCTS
+     * Dirichlet seed so the two streams are independent. */
+    std::mt19937 coin_rng(cfg.seed + (uint32_t)thread_id * 1000u + 7919u);
+
     /* Per-thread pool (~44 MB): always on heap, never stack. */
     NodePool *pool = new NodePool;
 
@@ -240,7 +276,7 @@ static void worker(int                  thread_id,
 
     for (int g = 0; g < num_games; g++) {
         play_one_game(pool, cfg, local_states, local_policies, local_values,
-                      local_t);
+                      coin_rng, local_t);
 
         /* Overwrite progress file: "games_done\n"
          * Polled by the Python runner to drive per-worker progress bars. */
@@ -292,6 +328,8 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Output    : %s\n", cfg.output_dir.c_str());
     fprintf(stderr, "TempMoves : %d\n", cfg.temp_moves);
     fprintf(stderr, "MaxMoves  : %d\n", cfg.max_moves);
+    fprintf(stderr, "FullProb  : %.3f\n", cfg.full_prob);
+    fprintf(stderr, "FastSims  : %d\n",  cfg.fast_sims);
     fprintf(stderr, "\n");
 
     std::vector<float> all_states, all_policies, all_values;

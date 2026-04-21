@@ -241,9 +241,17 @@ static int run_genmove(Engine &eng)
 {
     if (go_game_ended(&eng.state)) return PASS_ACTION;
 
+    /* Build history: [current, 1-ago, 2-ago, ...] newest-first. */
+    GoState gtp_hist[8];
+    gtp_hist[0] = eng.state;
+    int ghlen = 1;
+    for (int i = (int)eng.history.size() - 1; i >= 0 && ghlen < 8; i--)
+        gtp_hist[ghlen++] = eng.history[i].state;
+
     mcts_init_root(eng.pool, &eng.state, eng.player);
     mcts_simulate(eng.pool, nn_callback,
-                  eng.num_sims, eng.batch_size, /*add_noise=*/false);
+                  eng.num_sims, eng.batch_size, /*add_noise=*/false,
+                  gtp_hist, ghlen);
 
     /* Optional resign check on root Q. */
     if (eng.resign_threshold >= 0.0f) {

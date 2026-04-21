@@ -339,42 +339,28 @@ int go_get_winner(const GoState *state, int perspective)
 
 /* ── Neural-network input planes ─────────────────────────────────────── */
 
-void go_board_to_planes(const GoState *state, int player, int absolute_player,
-                        float *planes_out)
+void go_board_to_planes_17_with_history(const GoState *states, int n_states,
+                                         int absolute_player, float *planes_out)
 {
-    float *plane0 = planes_out;
-    float *plane1 = planes_out + NUM_POSITIONS;
-    float *plane2 = planes_out + 2 * NUM_POSITIONS;
+    int cap = (n_states < 8) ? n_states : 8;
+    for (int i = 0; i < 17 * NUM_POSITIONS; i++) planes_out[i] = 0.0f;
 
-    for (int i = 0; i < NUM_POSITIONS; i++) {
-        int canonical = (int)state->board[i] * player;
-        plane0[i] = (canonical ==  1) ? 1.0f : 0.0f;
-        plane1[i] = (canonical == -1) ? 1.0f : 0.0f;
+    for (int h = 0; h < cap; h++) {
+        /* At slot h, canonical perspective has flipped h times.
+         * Current player's stones are +1 for even h, -1 for odd h. */
+        int sign = (h % 2 == 0) ? 1 : -1;
+        float *cur = planes_out + h       * NUM_POSITIONS;
+        float *opp = planes_out + (h + 8) * NUM_POSITIONS;
+        for (int i = 0; i < NUM_POSITIONS; i++) {
+            int v  = (int)states[h].board[i] * sign;
+            cur[i] = (v ==  1) ? 1.0f : 0.0f;
+            opp[i] = (v == -1) ? 1.0f : 0.0f;
+        }
     }
+
     float color_val = (absolute_player == 1) ? 1.0f : 0.0f;
-    for (int i = 0; i < NUM_POSITIONS; i++)
-        plane2[i] = color_val;
-}
-
-void go_board_to_planes_17(const GoState *state, int player, int absolute_player,
-                            float *planes_out)
-{
-    /* Zero all 17 planes first (history planes stay zero). */
-    for (int i = 0; i < 17 * NUM_POSITIONS; i++)
-        planes_out[i] = 0.0f;
-
-    float *plane0  = planes_out;                      /* current-player stones */
-    float *plane8  = planes_out + 8  * NUM_POSITIONS; /* opponent stones       */
-    float *plane16 = planes_out + 16 * NUM_POSITIONS; /* color-to-play         */
-
-    for (int i = 0; i < NUM_POSITIONS; i++) {
-        int canonical = (int)state->board[i] * player;
-        plane0[i] = (canonical ==  1) ? 1.0f : 0.0f;
-        plane8[i] = (canonical == -1) ? 1.0f : 0.0f;
-    }
-    float color_val = (absolute_player == 1) ? 1.0f : 0.0f;
-    for (int i = 0; i < NUM_POSITIONS; i++)
-        plane16[i] = color_val;
+    float *p16 = planes_out + 16 * NUM_POSITIONS;
+    for (int i = 0; i < NUM_POSITIONS; i++) p16[i] = color_val;
 }
 
 /* ── Debug render ─────────────────────────────────────────────────────── */

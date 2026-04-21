@@ -3,7 +3,7 @@
 /*
  * go_engine.h — Pure C Go game logic for the C++ selfplay binary.
  *
- * Board size is fixed at 9x9 to match the Go implementation in game.py.
+ * Board size is a compile-time constant (default 9x9). Override with -DBOARD_SIZE=N.
  *
  * State layout mirrors game.py:
  *   board[0..NUM_POSITIONS-1]  0=empty, 1=black, -1=white
@@ -17,13 +17,23 @@
 extern "C" {
 #endif
 
-/* ── Board size (9x9 only) ────────────────────────────────────────────── */
+/* ── Board size (compile-time, overridable via -D flags) ─────────────── */
 
-#define BOARD_SIZE    9
-#define NUM_POSITIONS 81        /* 9 * 9 */
-#define PASS_ACTION   81
-#define ACTION_SIZE   82        /* 81 positions + 1 pass */
-#define KOMI          6.0f    /* standard 9x9 komi */
+#ifndef BOARD_SIZE
+#  define BOARD_SIZE    9
+#endif
+#ifndef NUM_POSITIONS
+#  define NUM_POSITIONS (BOARD_SIZE * BOARD_SIZE)
+#endif
+#ifndef PASS_ACTION
+#  define PASS_ACTION   NUM_POSITIONS
+#endif
+#ifndef ACTION_SIZE
+#  define ACTION_SIZE   (NUM_POSITIONS + 1)
+#endif
+#ifndef KOMI
+#  define KOMI          6.0f
+#endif
 
 /* ── Game state ───────────────────────────────────────────────────────── */
 
@@ -119,36 +129,25 @@ int go_get_winner(const GoState *state, int perspective);
 /* ── Neural-network input ─────────────────────────────────────────────── */
 
 /*
- * Convert state to the 3-plane float representation.
- * planes_out must hold 3 * NUM_POSITIONS floats, laid out as:
- *   [0 .. NUM_POSITIONS-1]        plane 0: current-player stones
- *   [NUM_POSITIONS .. 2N-1]       plane 1: opponent stones
- *   [2*NUM_POSITIONS .. 3N-1]     plane 2: color-to-play
- *                                           1.0 if absolute_player == +1 (Black)
- *                                           0.0 if absolute_player == -1 (White)
- * player:          canonical perspective (pass 1 for canonical-form states)
- * absolute_player: +1 = Black to move, -1 = White to move
- */
-void go_board_to_planes(const GoState *state, int player, int absolute_player,
-                        float *planes_out);
-
-/*
- * Convert state to the AlphaZero 17-plane float representation used by the NN.
+ * Convert state history to the AlphaZero 17-plane float representation.
  * planes_out must hold 17 * NUM_POSITIONS floats.
  *
- * Layout (matches board_to_canonical_17 in game.py and Python training):
- *   Planes  0-7 : current-player stones (plane 0 = current board;
- *                 planes 1-7 = history boards, zeroed — no history available)
- *   Planes  8-15: opponent stones        (plane 8 = current board;
- *                 planes 9-15 = history, zeroed)
- *   Plane  16   : color-to-play — 1.0 if absolute_player == +1 (Black),
- *                                  0.0 if absolute_player == -1 (White)
+ * Layout:
+ *   Planes  0-7 : current-player stones for each history step h=0..7
+ *   Planes  8-15: opponent stones for each history step h=0..7
+ *   Plane  16   : color-to-play — 1.0 (Black to move) / 0.0 (White to move)
  *
- * player:          canonical perspective (pass 1 for canonical-form states)
- * absolute_player: +1 = Black to move, -1 = White to move
+ * states[0] = current board (canonical, current player = +1)
+ * states[1] = board 1 move ago (canonical for the player who moved then)
+ * ...
+ * states[n_states-1] = oldest available board  (n_states in 1..8)
+ *
+ * Because canonical perspective alternates each ply, the function applies
+ * sign = (h%2==0)?1:-1 to recover the current player's perspective.
+ * absolute_player: +1 = Black to move, -1 = White to move (sets plane 16)
  */
-void go_board_to_planes_17(const GoState *state, int player, int absolute_player,
-                            float *planes_out);
+void go_board_to_planes_17_with_history(const GoState *states, int n_states,
+                                         int absolute_player, float *planes_out);
 
 /* ── Debug ────────────────────────────────────────────────────────────── */
 

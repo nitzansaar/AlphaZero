@@ -53,8 +53,6 @@ int mcts_init_root(NodePool *pool, const GoState *state, int player)
 
 /*
  * Return the action index of the child with the highest UCB score.
- * Mirrors Node::select_best_child in mcts.py, including virtual-loss
- * adjustments.
  *
  *   U(s,a) = -Q_adj + C * P(s,a) * sqrt(N_parent) / (1 + N_child)
  *
@@ -251,6 +249,38 @@ static void collect_leaves(NodePool *pool, int root_idx, int batch_size,
     *count_out = count;
 }
 
+/* ── History collection for NN input ─────────────────────────────────── */
+
+/*
+ * Collect up to 8 canonical GoStates for a leaf node by walking parent_idx
+ * links.  hist_out[0] = leaf, hist_out[1] = leaf's parent, ...
+ * When the root is reached (parent_idx < 0) and game_hist is provided, the
+ * caller's pre-root history (game_hist[1..]) is appended (game_hist[0] is the
+ * root state, already included via the tree chain).
+ * Returns the number of states written to hist_out.
+ */
+static int collect_leaf_history(const NodePool *pool, int leaf_idx,
+                                 const GoState *game_hist, int game_hist_len,
+                                 GoState *hist_out /* [8] */)
+{
+    int  n       = 0;
+    int  cur     = leaf_idx;
+    bool at_root = false;
+    while (cur >= 0 && n < 8) {
+        const Node *nd = &pool->nodes[cur];
+        if (!nd->state_set) break;
+        hist_out[n++] = nd->state;
+        if (nd->parent_idx < 0) { at_root = true; break; }
+        cur = nd->parent_idx;
+    }
+    if (at_root && game_hist != nullptr) {
+        /* game_hist[0] == root state (already in hist_out); extend with older. */
+        for (int g = 1; g < game_hist_len && n < 8; g++)
+            hist_out[n++] = game_hist[g];
+    }
+    return n;
+}
+
 /* ── Main simulation loop ─────────────────────────────────────────────── */
 
 /*
@@ -266,7 +296,8 @@ static void collect_leaves(NodePool *pool, int root_idx, int batch_size,
  *     f. Expand non-terminal leaves; back up every path.
  */
 void mcts_simulate(NodePool *pool, NNEvalFn nn_fn,
-                   int num_simulations, int batch_size, bool add_noise)
+                   int num_simulations, int batch_size, bool add_noise,
+                   const GoState *game_hist, int game_hist_len)
 {
     assert(batch_size <= MAX_BATCH_SIZE);
 
@@ -275,7 +306,11 @@ void mcts_simulate(NodePool *pool, NNEvalFn nn_fn,
     /* ── Step 1: expand root ──────────────────────────────────────────── */
     if (!go_game_ended(&root->state)) {
         float planes[17 * NUM_POSITIONS];
-        go_board_to_planes_17(&root->state, 1, root->player, planes);
+        {
+            GoState rh[8];
+            int rhl = collect_leaf_history(pool, 0, game_hist, game_hist_len, rh);
+            go_board_to_planes_17_with_history(rh, rhl, root->player, planes);
+        }
 
         float root_value;
         float root_policy[ACTION_SIZE];
@@ -343,8 +378,13 @@ void mcts_simulate(NodePool *pool, NNEvalFn nn_fn,
             Node *leaf = &pool->nodes[unique_idx[j]];
             if (!leaf->state_set) continue;
 
-            go_board_to_planes_17(&leaf->state, 1, leaf->player,
+            {
+                GoState lh[8];
+                int lhl = collect_leaf_history(pool, unique_idx[j],
+                                               game_hist, game_hist_len, lh);
+                go_board_to_planes_17_with_history(lh, lhl, leaf->player,
                                   batch_planes + nn_batch * 17 * NUM_POSITIONS);
+            }
             unique_eval_idx[j] = nn_batch;
             unique_has_eval[j] = 1;
             nn_batch++;
