@@ -20,10 +20,7 @@
 
 /* ── Compile-time limits ──────────────────────────────────────────────── */
 
-/* Maximum nodes in the pool.
- * Worst case: 1 + ACTION_SIZE + NUM_SIMULATIONS * ACTION_SIZE.
- * 9x9 at 800 sims: 65,683 → 100k.  19x19 at 400 sims: 145,163 → 200k.
- * Override at compile time: -DNODE_POOL_SIZE=200000 */
+/* Maximum nodes in the pool. */
 #ifndef NODE_POOL_SIZE
 #  define NODE_POOL_SIZE  100000
 #endif

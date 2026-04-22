@@ -1,12 +1,7 @@
 """
 selfplay_cpp_runner.py — C++-backed self-play data generator.
 
-Drop-in replacement for selfplay.py; produces the same pickle dataset.
-
     python selfplay_cpp_runner.py
-
-Switch back to the Python version at any time by running selfplay.py instead
-(or by using run_training_loop.py instead of run_training_loop_cpp.py).
 
 Requires:
     ./selfplay_cpp   — compiled from selfplay_cpp.cpp
@@ -37,11 +32,16 @@ from dataset import TrainingDataset
 
 # Path to the compiled C++ binary (same directory as this script).
 _HERE = os.path.dirname(os.path.abspath(__file__))
-SELFPLAY_BINARY = os.path.join(_HERE, "selfplay_cpp")
 
-# Each worker is a separate process with its own CUDA context, matching
-# exactly what selfplay.py does with torch.multiprocessing.
-NUM_WORKERS = os.cpu_count() or 1
+# Select board-size-specific binary: keep "selfplay_cpp" for 9x9 (backward
+# compat with any pre-compiled binary); use "selfplay_cpp_N" for other sizes.
+_BINARY_NAME = "selfplay_cpp" if cfg.BOARD_SIZE == 9 else f"selfplay_cpp_{cfg.BOARD_SIZE}"
+SELFPLAY_BINARY = os.path.join(_HERE, _BINARY_NAME)
+
+# Cap workers from config (Config19x19Base sets NUM_SELFPLAY_WORKERS=4 because
+# each 19x19 worker allocates ~374 MB for the node pool).
+_worker_cap = getattr(cfg, 'NUM_SELFPLAY_WORKERS', None)
+NUM_WORKERS = min(os.cpu_count() or 1, _worker_cap) if _worker_cap else (os.cpu_count() or 1)
 
 # Whether to pass --cuda to the binary.  Falls back to CPU automatically
 # if CUDA is unavailable on the target machine.
@@ -109,19 +109,20 @@ def export_torchscript(state_dict_path):
 # ── Main ──────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    if cfg.BOARD_SIZE == 5:
+        print("ERROR: 5x5 uses Python selfplay — C++ binary not built for 5x5.")
+        print("Use:  python run_training_loop.py   (or selfplay.py directly)")
+        sys.exit(1)
+
     total_start = time.time()
 
     # Verify binary exists.
     if not os.path.isfile(SELFPLAY_BINARY):
         print(f"ERROR: C++ binary not found: {SELFPLAY_BINARY}")
-        print("Compile it with:")
-        print("  TORCH=$(.venv/bin/python -c \"import torch,os; print(os.path.dirname(torch.__file__))\")")
-        print("  g++ -O2 -std=c++17 -fno-pie -no-pie -I. \\")
-        print("      -I$TORCH/include -I$TORCH/include/torch/csrc/api/include \\")
-        print("      -L$TORCH/lib -Wl,-rpath,$TORCH/lib \\")
-        print("      -Wl,--no-as-needed -ltorch -ltorch_cpu -lc10 \\")
-        print("      -o selfplay_cpp \\")
-        print("      go_engine.c mcts.cpp nn_inference.cpp npy_writer.c selfplay_cpp.cpp")
+        if cfg.BOARD_SIZE == 9:
+            print("Compile it with:  make selfplay_cpp")
+        else:
+            print(f"Compile it with:  make selfplay_cpp_{cfg.BOARD_SIZE}")
         sys.exit(1)
 
     os.makedirs(cfg.SAVE_PICKLES, exist_ok=True)
@@ -171,8 +172,10 @@ if __name__ == "__main__":
                 "--threads",        "1",
                 "--output",         worker_dir,
                 "--temp-moves",     str(cfg.TEMP_THRESHOLD),
-                "--max-moves",      "200",
+                "--max-moves",      str(getattr(cfg, 'MAX_MOVES', 200)),
                 "--seed",           str(i * 1000),
+                "--full-prob",      str(cfg.PLAYOUT_CAP_PROB),
+                "--fast-sims",      str(cfg.FAST_SIMS),
             ]
             if USE_CUDA:
                 cmd.append("--cuda")

@@ -1,11 +1,12 @@
 import os
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from torch.amp import autocast, GradScaler
 from model import NeuralNetwork
 from dataset import TrainingDataset, GoDataset
 from config import Config as cfg
+from shuffle import apply_shuffle, MIN_ROWS
 from glob import glob
 import pandas as pd
 import argparse
@@ -93,25 +94,43 @@ class Trainer:
         ds = TrainingDataset()
         save_path = os.path.join(cfg.SAVE_PICKLES, cfg.DATASET_PATH)
         ds.load(save_path)
-        # return all data as training data with augmentation enabled
-        all_data = GoDataset(ds.training_dataset, use_augmentation=True)
-        # empty_eval = TicTacToeDataset([])
-        return all_data
+        return ds.training_dataset
 
     def train(self, use_mixed_precision=True):
         timer = Timer()
 
         with timer.track("load_data"):
-            self.train_data = self.load_data()
+            raw_dataset = self.load_data()
 
-        # Optimize DataLoader for RTX 5090
+        # KataGo-style shuffle: enforce minimum row count and apply temporal taper
+        # so that newer self-play data drives the gradient signal more than old data.
+        shuffled_rows, sample_weights = apply_shuffle(raw_dataset)
+        if shuffled_rows is None:
+            print(f"Insufficient data: {len(raw_dataset)} rows < {MIN_ROWS} minimum. "
+                  "Skipping training this cycle.")
+            return
+
+        n_rows = len(shuffled_rows)
+        print(f"Shuffle: using {n_rows} rows (of {len(raw_dataset)} total); "
+              f"weight range [{sample_weights[0]:.2f}, {sample_weights[-1]:.2f}]")
+
+        self.train_data = GoDataset(shuffled_rows, use_augmentation=True)
+
+        # WeightedRandomSampler applies the temporal taper at sample time.
+        # replacement=True is required for WeightedRandomSampler.
+        sampler = WeightedRandomSampler(
+            weights=torch.from_numpy(sample_weights),
+            num_samples=n_rows,
+            replacement=True,
+        )
+
         train_dataloader = DataLoader(
             self.train_data,
             batch_size=cfg.BATCH_SIZE,
-            shuffle=True,
-            num_workers=8,  # Parallel data loading
-            pin_memory=True,  # Faster data transfer to GPU
-            persistent_workers=False
+            sampler=sampler,   # replaces shuffle=True
+            num_workers=8,
+            pin_memory=True,
+            persistent_workers=False,
         )
 
         # AlphaGo Zero uses MSE for value and cross-entropy for policy
@@ -186,9 +205,11 @@ class Trainer:
             with timer.track("forward_pass"):
                 with autocast(device):
                     yv, yp = self.model(X)
-                    vloss = value_criterion(yv.squeeze(-1), v)
-                    aloss = policy_criterion(yp, p)
-                    loss = vloss + aloss
+                    vloss_raw = value_criterion(yv.squeeze(-1), v)
+                    aloss_raw = policy_criterion(yp, p)
+                    # Scale value loss to match policy cross-entropy magnitude
+                    # (~0.5 raw vs ~5.0 raw) so both heads drive the backbone equally.
+                    loss = vloss_raw * cfg.VALUE_LOSS_WEIGHT + aloss_raw * cfg.POLICY_LOSS_WEIGHT
 
             with timer.track("backward_pass"):
                 optimizer.zero_grad(set_to_none=True)
@@ -201,8 +222,10 @@ class Trainer:
                 scaler.update()
 
             train_loss = loss.item()
-            print(f"Step {step}: Total Loss: {train_loss:.6f}; Value Loss: {vloss.item():.6f}; Policy Loss: {aloss.item():.6f}")
-            history.append([step, train_loss, vloss.item(), aloss.item()])
+            print(f"Step {step}: Total Loss: {train_loss:.6f}; "
+                  f"Value Loss (raw): {vloss_raw.item():.6f}; "
+                  f"Policy Loss (raw): {aloss_raw.item():.6f}")
+            history.append([step, train_loss, vloss_raw.item(), aloss_raw.item()])
 
         # Always save the model after completing all steps
         current_iteration = self.latest_file_number + 1
@@ -218,7 +241,6 @@ class Trainer:
         print(f"Timing data saved to {timing_path}")
 
         history = pd.DataFrame(history, columns=["Step", "Tr_Loss", "Value_Loss", "Policy_Loss"])
-        current_iteration = self.latest_file_number + 1
         logpath = os.path.join(cfg.LOGDIR, "{}_history.csv".format(current_iteration))
         history.to_csv(logpath, index=None)
         print(history)

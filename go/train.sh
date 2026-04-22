@@ -6,6 +6,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+export BOARD_SIZE=19
+
 LOGDIR=$(python3 -c "from config import Config as cfg; print(cfg.LOGDIR)")
 
 START_TIME=$(date '+%Y-%m-%d %H:%M:%S %Z')

@@ -284,7 +284,7 @@ static int collect_leaf_history(const NodePool *pool, int leaf_idx,
 /* ── Main simulation loop ─────────────────────────────────────────────── */
 
 /*
- * Batched MCTS.  Mirrors run_simulation_batched in mcts.py step for step:
+ * Batched MCTS simulation.
  *
  *  1. Expand root with a single NN call.
  *  2. Loop until num_simulations complete:
@@ -472,8 +472,8 @@ int mcts_select_move(const NodePool *pool,
         return best_action;
     }
 
-    /* Explore: sample proportional to visits^(1/temperature).
-     * Mirrors the "explore" branch of mcts.py::select_move. */
+
+    /* Explore: sample proportional to visits^(1/temperature) */
     float weights[ACTION_SIZE] = {};
     float wsum = 0.0f;
     for (int a = 0; a < ACTION_SIZE; a++) {

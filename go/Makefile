@@ -19,11 +19,19 @@ MCTS_CPP = mcts.cpp
 NN_CPP   = nn_inference.cpp
 NPY_C    = npy_writer.c
 
-BINARIES = test_go_engine test_mcts test_nn selfplay_cpp gatekeeper gtp_engine
+# 19x19 compile-time overrides
+DEFINES_19 = -DBOARD_SIZE=19 -DNUM_POSITIONS=361 -DPASS_ACTION=361 \
+             -DACTION_SIZE=362 "-DKOMI=7.5f" -DNODE_POOL_SIZE=200000
 
-.PHONY: all tests clean
+BINARIES    = test_go_engine test_mcts test_nn selfplay_cpp gatekeeper gtp_engine
+BINARIES_19 = selfplay_cpp_19 gatekeeper_19 gtp_engine_19 \
+              test_go_engine_19 test_mcts_19 test_nn_19
+
+.PHONY: all all_19 tests tests_19 clean
 
 all: $(BINARIES)
+
+all_19: $(BINARIES_19)
 
 # Phase 1 — Go engine unit tests (pure C)
 test_go_engine: $(ENGINE_C) tests/test_go_engine.c
@@ -49,6 +57,28 @@ gatekeeper: $(ENGINE_C) $(MCTS_CPP) $(NN_CPP) gatekeeper.cpp
 gtp_engine: $(ENGINE_C) $(MCTS_CPP) $(NN_CPP) gtp_engine.cpp
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 
+# ── 19×19 binaries ────────────────────────────────────────────────────────
+
+selfplay_cpp_19: $(ENGINE_C) $(MCTS_CPP) $(NN_CPP) $(NPY_C) selfplay_cpp.cpp
+	$(CXX) $(CXXFLAGS) $(DEFINES_19) $(LDFLAGS) -o $@ $^
+
+gatekeeper_19: $(ENGINE_C) $(MCTS_CPP) $(NN_CPP) gatekeeper.cpp
+	$(CXX) $(CXXFLAGS) $(DEFINES_19) $(LDFLAGS) -o $@ $^
+
+gtp_engine_19: $(ENGINE_C) $(MCTS_CPP) $(NN_CPP) gtp_engine.cpp
+	$(CXX) $(CXXFLAGS) $(DEFINES_19) $(LDFLAGS) -o $@ $^
+
+test_go_engine_19: $(ENGINE_C) tests/test_go_engine.c
+	$(CC) $(CFLAGS) $(DEFINES_19) -o $@ $^
+
+test_mcts_19: $(ENGINE_C) $(MCTS_CPP) tests/test_mcts.cpp
+	$(CXX) -O2 -std=c++17 -Wall -I. $(DEFINES_19) -o $@ $^
+
+test_nn_19: $(ENGINE_C) $(MCTS_CPP) $(NN_CPP) tests/test_nn.cpp
+	$(CXX) $(CXXFLAGS) $(DEFINES_19) $(LDFLAGS) -o $@ $^
+
+# ── Test targets ───────────────────────────────────────────────────────────
+
 # Run all test binaries
 tests: test_go_engine test_mcts test_nn
 	@echo "=== test_go_engine ==="
@@ -58,5 +88,12 @@ tests: test_go_engine test_mcts test_nn
 	@echo "=== test_nn ==="
 	./test_nn
 
+# Run 19x19 test binaries (test_nn_19 requires an exported 19x19 TorchScript model)
+tests_19: test_go_engine_19 test_mcts_19
+	@echo "=== test_go_engine_19 ==="
+	./test_go_engine_19
+	@echo "=== test_mcts_19 ==="
+	./test_mcts_19
+
 clean:
-	rm -f $(BINARIES)
+	rm -f $(BINARIES) $(BINARIES_19)

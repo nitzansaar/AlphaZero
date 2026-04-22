@@ -105,19 +105,19 @@ class TrainingDataset:
         """Load positions produced by selfplay_cpp from .npy files.
 
         Reads:
-          <npy_dir>/states.npy    (N, 17, 9, 9)  float32 — 17-plane AlphaZero input
-          <npy_dir>/policies.npy  (N, 82)         float32 — MCTS visit probabilities
-          <npy_dir>/values.npy    (N,)             float32 — game outcome values
+          <npy_dir>/states.npy    (N, 17, BOARD_SIZE, BOARD_SIZE)  float32
+          <npy_dir>/policies.npy  (N, ACTION_SIZE)                  float32
+          <npy_dir>/values.npy    (N,)                              float32
 
-        States are stored as pre-computed (17,9,9) tensors; GoDataset uses them
-        directly without calling board_to_canonical_3d.  Plane 16 encodes
+        States are stored as pre-computed (17, B, B) tensors; GoDataset uses
+        them directly without calling board_to_canonical_3d.  Plane 16 encodes
         color-to-play (1.0 = Black, 0.0 = White).
 
         Any additional files (ownership.npy, scores.npy) are silently ignored.
         """
         import os as _os
-        states   = np.load(_os.path.join(npy_dir, 'states.npy'))    # (N, 17, 9, 9)
-        policies = np.load(_os.path.join(npy_dir, 'policies.npy'))  # (N, 82)
+        states   = np.load(_os.path.join(npy_dir, 'states.npy'))    # (N, 17, BOARD_SIZE, BOARD_SIZE)
+        policies = np.load(_os.path.join(npy_dir, 'policies.npy'))  # (N, ACTION_SIZE)
         values   = np.load(_os.path.join(npy_dir, 'values.npy'))    # (N,)
 
         N = len(values)
