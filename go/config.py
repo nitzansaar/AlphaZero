@@ -67,6 +67,9 @@ class Config5x5:
     TEMP_THRESHOLD = 6
     INITIAL_TEMP = 1.0
 
+    # Pass suppression during self-play (training heuristic, not a rule change)
+    MIN_PASS_MOVE = 0  # disabled — 5x5 games are very short
+
     # Data augmentation
     USE_AUGMENTATION = True
 
@@ -143,6 +146,9 @@ class Config9x9Base:
     TEMP_THRESHOLD = 15  # Opening moves with temp=1; rest greedy (~17% of ~90-move game)
     INITIAL_TEMP = 1.0
 
+    # Pass suppression during self-play (training heuristic, not a rule change)
+    MIN_PASS_MOVE = 0   # suppress pass at root for first 80 half-moves (~40 per player)
+
     # Data augmentation
     USE_AUGMENTATION = True
 
@@ -212,6 +218,9 @@ class Config19x19Base:
     # Temperature — first 30 moves exploratory (~10% of a 300-move game)
     TEMP_THRESHOLD = 30
     INITIAL_TEMP = 1.0
+
+    # Pass suppression during self-play (training heuristic, not a rule change)
+    MIN_PASS_MOVE = 80   # suppress pass at root for first 80 half-moves (~40 per player)
 
     # Data augmentation
     USE_AUGMENTATION = True
