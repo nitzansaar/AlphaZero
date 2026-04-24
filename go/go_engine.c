@@ -339,11 +339,36 @@ int go_get_winner(const GoState *state, int perspective)
 
 /* ── Neural-network input planes ─────────────────────────────────────── */
 
+static void fill_current_structure_planes(const GoState *state, float *planes_out)
+{
+    int8_t visited[NUM_POSITIONS];
+    memset(visited, 0, NUM_POSITIONS);
+
+    int group[NUM_POSITIONS];
+    int group_size;
+
+    for (int idx = 0; idx < NUM_POSITIONS; idx++) {
+        if (state->board[idx] == 0 || visited[idx]) continue;
+
+        int liberties = go_find_group(state->board, idx, group, &group_size);
+        int liberty_plane = (liberties == 1) ? 17 : (liberties == 2) ? 18 : 19;
+
+        for (int i = 0; i < group_size; i++) {
+            int stone_idx = group[i];
+            visited[stone_idx] = 1;
+            planes_out[liberty_plane * NUM_POSITIONS + stone_idx] = 1.0f;
+        }
+    }
+
+    if (state->ko_point >= 0 && state->ko_point < NUM_POSITIONS)
+        planes_out[20 * NUM_POSITIONS + state->ko_point] = 1.0f;
+}
+
 void go_board_to_planes_17_with_history(const GoState *states, int n_states,
                                          int absolute_player, float *planes_out)
 {
     int cap = (n_states < 8) ? n_states : 8;
-    for (int i = 0; i < 17 * NUM_POSITIONS; i++) planes_out[i] = 0.0f;
+    for (int i = 0; i < GO_NN_INPUT_PLANES * NUM_POSITIONS; i++) planes_out[i] = 0.0f;
 
     for (int h = 0; h < cap; h++) {
         /* At slot h, canonical perspective has flipped h times.
@@ -361,6 +386,9 @@ void go_board_to_planes_17_with_history(const GoState *states, int n_states,
     float color_val = (absolute_player == 1) ? 1.0f : 0.0f;
     float *p16 = planes_out + 16 * NUM_POSITIONS;
     for (int i = 0; i < NUM_POSITIONS; i++) p16[i] = color_val;
+
+    if (n_states > 0)
+        fill_current_structure_planes(&states[0], planes_out);
 }
 
 /* ── Debug render ─────────────────────────────────────────────────────── */

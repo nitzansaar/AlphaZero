@@ -110,6 +110,8 @@ static void expand_node(NodePool *pool, int node_idx,
     /* Mask with legal moves; state is always in canonical form. */
     float valid[ACTION_SIZE];
     go_get_valid_moves(&node->state, 1, valid);
+    if (pool->suppress_pass && node_idx == 0)
+        valid[PASS_ACTION] = 0.0f;   /* training heuristic: suppress early pass at root */
 
     for (int a = 0; a < ACTION_SIZE; a++) {
         float prob = policy[a] * valid[a];
@@ -305,7 +307,7 @@ void mcts_simulate(NodePool *pool, NNEvalFn nn_fn,
 
     /* ── Step 1: expand root ──────────────────────────────────────────── */
     if (!go_game_ended(&root->state)) {
-        float planes[17 * NUM_POSITIONS];
+        float planes[GO_NN_INPUT_PLANES * NUM_POSITIONS];
         {
             GoState rh[8];
             int rhl = collect_leaf_history(pool, 0, game_hist, game_hist_len, rh);
@@ -365,7 +367,7 @@ void mcts_simulate(NodePool *pool, NNEvalFn nn_fn,
         }
 
         /* 2d — build NN batch (one entry per unique leaf with a state) */
-        float batch_planes  [MAX_BATCH_SIZE * 17 * NUM_POSITIONS];
+        float batch_planes  [MAX_BATCH_SIZE * GO_NN_INPUT_PLANES * NUM_POSITIONS];
         float batch_values  [MAX_BATCH_SIZE];
         float batch_policies[MAX_BATCH_SIZE * ACTION_SIZE];
 
@@ -383,7 +385,7 @@ void mcts_simulate(NodePool *pool, NNEvalFn nn_fn,
                 int lhl = collect_leaf_history(pool, unique_idx[j],
                                                game_hist, game_hist_len, lh);
                 go_board_to_planes_17_with_history(lh, lhl, leaf->player,
-                                  batch_planes + nn_batch * 17 * NUM_POSITIONS);
+                                  batch_planes + nn_batch * GO_NN_INPUT_PLANES * NUM_POSITIONS);
             }
             unique_eval_idx[j] = nn_batch;
             unique_has_eval[j] = 1;

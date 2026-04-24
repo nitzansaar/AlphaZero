@@ -34,6 +34,9 @@ extern "C" {
 #ifndef KOMI
 #  define KOMI          6.0f
 #endif
+#ifndef GO_NN_INPUT_PLANES
+#  define GO_NN_INPUT_PLANES 21
+#endif
 
 /* ── Game state ───────────────────────────────────────────────────────── */
 
@@ -129,13 +132,17 @@ int go_get_winner(const GoState *state, int perspective);
 /* ── Neural-network input ─────────────────────────────────────────────── */
 
 /*
- * Convert state history to the AlphaZero 17-plane float representation.
- * planes_out must hold 17 * NUM_POSITIONS floats.
+ * Convert state history to the current neural-network input representation.
+ * The function name is legacy, but the output now includes additional
+ * current-board structure planes. planes_out must hold
+ * GO_NN_INPUT_PLANES * NUM_POSITIONS floats.
  *
  * Layout:
  *   Planes  0-7 : current-player stones for each history step h=0..7
  *   Planes  8-15: opponent stones for each history step h=0..7
  *   Plane  16   : color-to-play — 1.0 (Black to move) / 0.0 (White to move)
+ *   Planes 17-19: current-board liberty bins for all stones (1, 2, 3+)
+ *   Plane  20   : current ko-forbidden point
  *
  * states[0] = current board (canonical, current player = +1)
  * states[1] = board 1 move ago (canonical for the player who moved then)

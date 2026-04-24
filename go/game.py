@@ -1,5 +1,5 @@
 import numpy as np
-from config import BOARD_SIZE, NUM_POSITIONS, PASS_ACTION, ACTION_SIZE, KOMI
+from config import BOARD_SIZE, NUM_POSITIONS, PASS_ACTION, ACTION_SIZE, KOMI, NN_INPUT_PLANES
 
 
 def board_to_canonical_3d(board_flat, player):
@@ -30,10 +30,10 @@ def board_to_canonical_3d(board_flat, player):
 
 def board_to_canonical_17(board_flat, player):
     """
-    Convert flat board state to AlphaZero 17-plane representation (no history).
+    Convert flat board state to the current neural-network input representation.
 
-    Matches the encoding used by go_board_to_planes_17() in go_engine.c when
-    called with n_hist=1 (current board only, history planes zeroed out).
+    Matches the layout produced by `go_board_to_planes_17_with_history()` in
+    `go_engine.c` when called with a single current board and no prior history.
 
     Args:
         board_flat: Flat array of NUM_POSITIONS values in absolute form
@@ -41,26 +41,33 @@ def board_to_canonical_17(board_flat, player):
         player: Current player in absolute form (1=Black, -1=White)
 
     Returns:
-        17-plane numpy array of shape (17, BOARD_SIZE, BOARD_SIZE):
+        numpy array of shape (NN_INPUT_PLANES, BOARD_SIZE, BOARD_SIZE):
         - Plane 0:    Current player's stones on the current board
         - Planes 1-7: Prior boards (zeroed — no history available)
         - Plane 8:    Opponent's stones on the current board
         - Planes 9-15: Prior opponent boards (zeroed — no history available)
         - Plane 16:   Color-to-play (1.0 if player == 1 / Black, else 0.0)
+        - Planes 17-19: Current-board liberty bins for all stones (1, 2, 3+)
+        - Plane 20:   Current ko-forbidden point
     """
     board_2d = np.array(board_flat[:NUM_POSITIONS]).reshape(BOARD_SIZE, BOARD_SIZE)
 
-    planes = np.zeros((17, BOARD_SIZE, BOARD_SIZE), dtype=np.float32)
+    planes = np.zeros((NN_INPUT_PLANES, BOARD_SIZE, BOARD_SIZE), dtype=np.float32)
     planes[0]  = (board_2d == player).astype(np.float32)   # current player's stones
     planes[8]  = (board_2d == -player).astype(np.float32)  # opponent's stones
     planes[16] = 1.0 if player == 1 else 0.0               # color-to-play
+    _fill_current_structure_planes(
+        planes,
+        np.asarray(board_flat[:NUM_POSITIONS]),
+        int(board_flat[NUM_POSITIONS]) if len(board_flat) > NUM_POSITIONS else -1,
+    )
 
     return planes
 
 
 def board_to_planes_17_with_history(board_flat, player, hist_boards_abs):
     """
-    Build a 17-plane tensor with full board history.
+    Build the neural-network input tensor with full board history.
 
     Args:
         board_flat:       Current board in absolute form (1=Black, -1=White, 0=empty),
@@ -70,12 +77,14 @@ def board_to_planes_17_with_history(board_flat, player, hist_boards_abs):
                           Shorter lists are zero-padded (older slots stay 0).
 
     Returns:
-        numpy array (17, BOARD_SIZE, BOARD_SIZE) float32.
+        numpy array (NN_INPUT_PLANES, BOARD_SIZE, BOARD_SIZE) float32.
         Planes 0-7:  current-player stones (current board, then history newest→oldest).
         Planes 8-15: opponent stones (same ordering).
         Plane 16:    color-to-play (1.0 if Black, 0.0 if White).
+        Planes 17-19: current-board liberty bins for all stones (1, 2, 3+).
+        Plane 20:    current ko-forbidden point.
     """
-    planes = np.zeros((17, BOARD_SIZE, BOARD_SIZE), dtype=np.float32)
+    planes = np.zeros((NN_INPUT_PLANES, BOARD_SIZE, BOARD_SIZE), dtype=np.float32)
     board_2d = np.array(board_flat[:NUM_POSITIONS]).reshape(BOARD_SIZE, BOARD_SIZE)
     planes[0] = (board_2d == player).astype(np.float32)
     planes[8] = (board_2d == -player).astype(np.float32)
@@ -84,6 +93,11 @@ def board_to_planes_17_with_history(board_flat, player, hist_boards_abs):
         planes[1 + i] = (h == player).astype(np.float32)
         planes[9 + i] = (h == -player).astype(np.float32)
     planes[16] = 1.0 if player == 1 else 0.0
+    _fill_current_structure_planes(
+        planes,
+        np.asarray(board_flat[:NUM_POSITIONS]),
+        int(board_flat[NUM_POSITIONS]) if len(board_flat) > NUM_POSITIONS else -1,
+    )
     return planes
 
 
@@ -110,6 +124,52 @@ def get_neighbors(idx):
     if col < BOARD_SIZE - 1:
         neighbors.append(coord_to_idx(row, col + 1))
     return neighbors
+
+
+def _collect_group_and_liberties(board_flat, start_idx):
+    """Return all stones in the connected group and its liberties."""
+    color = board_flat[start_idx]
+    if color == 0:
+        return set(), set()
+
+    group = set()
+    liberties = set()
+    stack = [start_idx]
+
+    while stack:
+        current = stack.pop()
+        if current in group:
+            continue
+        group.add(current)
+
+        for neighbor in get_neighbors(current):
+            neighbor_color = board_flat[neighbor]
+            if neighbor_color == 0:
+                liberties.add(neighbor)
+            elif neighbor_color == color and neighbor not in group:
+                stack.append(neighbor)
+
+    return group, liberties
+
+
+def _fill_current_structure_planes(planes, board_flat, ko_point):
+    """Add current-board liberty and ko structure after the legacy 17 planes."""
+    visited = set()
+    for idx in range(NUM_POSITIONS):
+        if board_flat[idx] == 0 or idx in visited:
+            continue
+
+        group, liberties = _collect_group_and_liberties(board_flat, idx)
+        visited.update(group)
+
+        liberty_plane = 17 if len(liberties) == 1 else 18 if len(liberties) == 2 else 19
+        for stone_idx in group:
+            row, col = idx_to_coord(stone_idx)
+            planes[liberty_plane, row, col] = 1.0
+
+    if 0 <= ko_point < NUM_POSITIONS:
+        row, col = idx_to_coord(ko_point)
+        planes[20, row, col] = 1.0
 
 
 class Go:

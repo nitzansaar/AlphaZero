@@ -2,7 +2,8 @@
  * selfplay_cpp.cpp — AlphaZero-style self-play data generator.
  *
  * Produces three .npy files in an output directory:
- *   states.npy    float32 (N, 17, BOARD_SIZE, BOARD_SIZE)  AlphaZero 17-plane repr
+ *   states.npy    float32 (N, GO_NN_INPUT_PLANES, BOARD_SIZE, BOARD_SIZE)
+ *                 Go input tensor with history, liberties, and ko
  *   policies.npy  float32 (N, ACTION_SIZE)                  MCTS visit-count probs
  *   values.npy    float32 (N,)                              game outcome per position
  *
@@ -83,6 +84,7 @@ struct Config {
     /* Playout cap randomization */
     float    full_prob      = 0.25f; /* fraction of turns that use full search */
     int      fast_sims      = 100;  /* simulation budget for non-training (fast) turns       */
+    int      min_pass_move  = 80;    /* suppress pass at root for the first N half-moves (0=off) */
 };
 
 static void print_usage(const char *prog)
@@ -102,9 +104,11 @@ static void print_usage(const char *prog)
             "  --seed N         base RNG seed             (default: 42)\n"
             "  --full-prob F    fraction of turns w/ full search (default: 1.0 = disabled)\n"
             "  --fast-sims N    sims for non-training turns       (default: 100)\n"
+            "  --min-pass-move N  suppress pass at root for first N half-moves\n"
             "\n"
             "Output files in DIR:\n"
-            "  states.npy    (N, 17, BOARD_SIZE, BOARD_SIZE)  AlphaZero 17-plane repr\n"
+            "  states.npy    (N, GO_NN_INPUT_PLANES, BOARD_SIZE, BOARD_SIZE)\n"
+            "                Go input tensor with history, liberties, and ko\n"
             "  policies.npy  (N, ACTION_SIZE)                  MCTS visit probabilities\n"
             "  values.npy    (N,)                              game outcome per position\n",
             prog);
@@ -125,8 +129,9 @@ static bool parse_args(int argc, char *argv[], Config &cfg)
         else if (strcmp(argv[i], "--temp-moves")   == 0 && i+1 < argc) cfg.temp_moves = atoi(argv[++i]);
         else if (strcmp(argv[i], "--max-moves")    == 0 && i+1 < argc) cfg.max_moves  = atoi(argv[++i]);
         else if (strcmp(argv[i], "--seed")         == 0 && i+1 < argc) cfg.seed       = (uint32_t)atoi(argv[++i]);
-        else if (strcmp(argv[i], "--full-prob")    == 0 && i+1 < argc) cfg.full_prob   = (float)atof(argv[++i]);
-        else if (strcmp(argv[i], "--fast-sims")    == 0 && i+1 < argc) cfg.fast_sims   = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--full-prob")    == 0 && i+1 < argc) cfg.full_prob      = (float)atof(argv[++i]);
+        else if (strcmp(argv[i], "--fast-sims")    == 0 && i+1 < argc) cfg.fast_sims      = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--min-pass-move") == 0 && i+1 < argc) cfg.min_pass_move = atoi(argv[++i]);
         else {
             fprintf(stderr, "Unknown argument: %s\n", argv[i]);
             return false;
@@ -138,7 +143,7 @@ static bool parse_args(int argc, char *argv[], Config &cfg)
 /* ── Game data structures ─────────────────────────────────────────────── */
 // step is one training example
 struct Step {
-    float planes[17 * NUM_POSITIONS]; /* AlphaZero 17-plane representation */
+    float planes[GO_NN_INPUT_PLANES * NUM_POSITIONS]; /* Input planes for one position */
     float probs[ACTION_SIZE];          /* MCTS visit-count probabilities    */
     int   absolute_player;             /* +1 Black / -1 White               */
 };
@@ -174,7 +179,7 @@ static void play_one_game(NodePool           *pool,
         bool is_full_search = full_dist(coin_rng);
         int  sims = is_full_search ? cfg.num_sims : cfg.fast_sims;
 
-        /* 17-plane input with full move history. */
+        /* Input tensor with full move history plus current liberties and ko. */
         auto tp = Clock::now();
         hist.push_front(state);
         if ((int)hist.size() > 8) hist.pop_back();
@@ -189,6 +194,7 @@ static void play_one_game(NodePool           *pool,
          * greedier search purely to advance the game state cheaply. */
         auto tm = Clock::now();
         mcts_init_root(pool, &state, absolute_player);
+        pool->suppress_pass = (cfg.min_pass_move > 0 && move_count < cfg.min_pass_move);
         mcts_simulate(pool, nn_callback,
                       sims, cfg.batch_size, /*add_noise=*/is_full_search,
                       hist_arr, nhist);
@@ -235,7 +241,7 @@ static void play_one_game(NodePool           *pool,
                     : (winner == s.absolute_player) ? 1.0f : -1.0f;
 
         out_states.insert(out_states.end(),
-                          s.planes, s.planes + 17 * NUM_POSITIONS);
+                          s.planes, s.planes + GO_NN_INPUT_PLANES * NUM_POSITIONS);
         out_policies.insert(out_policies.end(),
                             s.probs, s.probs + ACTION_SIZE);
         out_values.push_back(value);
@@ -264,13 +270,14 @@ static void worker(int                  thread_id,
      * Dirichlet seed so the two streams are independent. */
     std::mt19937 coin_rng(cfg.seed + (uint32_t)thread_id * 1000u + 7919u);
 
-    /* Per-thread pool (~44 MB): always on heap, never stack. */
+    /* Per-thread pool: always on heap */
     NodePool *pool = new NodePool;
 
     std::vector<float> local_states, local_policies, local_values;
-    local_states.reserve((size_t)(num_games * 80 * 17 * NUM_POSITIONS));
-    local_policies.reserve((size_t)(num_games * 80 * ACTION_SIZE));
-    local_values.reserve((size_t)(num_games * 80));
+    const size_t est_moves = (size_t)cfg.max_moves;   // worst-case upper bound
+    local_states.reserve((size_t)num_games * est_moves * GO_NN_INPUT_PLANES * NUM_POSITIONS);
+    local_policies.reserve((size_t)num_games * est_moves * ACTION_SIZE);
+    local_values.reserve((size_t)num_games * est_moves);
 
     Timings local_t;
 
@@ -330,6 +337,7 @@ int main(int argc, char *argv[])
     fprintf(stderr, "MaxMoves  : %d\n", cfg.max_moves);
     fprintf(stderr, "FullProb  : %.3f\n", cfg.full_prob);
     fprintf(stderr, "FastSims  : %d\n",  cfg.fast_sims);
+    fprintf(stderr, "MinPassMove: %d\n", cfg.min_pass_move);
     fprintf(stderr, "\n");
 
     std::vector<float> all_states, all_policies, all_values;
@@ -365,12 +373,12 @@ int main(int argc, char *argv[])
     int N = (int)all_values.size();
     fprintf(stderr, "\nTotal positions: %d\n", N);
 
-    /* states.npy — (N, 17, 9, 9) */
+    /* states.npy — (N, GO_NN_INPUT_PLANES, BOARD_SIZE, BOARD_SIZE) */
     {
         std::string path = cfg.output_dir + "/states.npy";
-        int dims[] = {N, 17, BOARD_SIZE, BOARD_SIZE};
+        int dims[] = {N, GO_NN_INPUT_PLANES, BOARD_SIZE, BOARD_SIZE};
         if (npy_write_float32(path.c_str(), all_states.data(),
-                              N * 17 * NUM_POSITIONS, 4, dims) != 0) {
+                              N * GO_NN_INPUT_PLANES * NUM_POSITIONS, 4, dims) != 0) {
             fprintf(stderr, "ERROR: failed to write %s\n", path.c_str());
             return 1;
         }

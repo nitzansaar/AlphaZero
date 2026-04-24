@@ -134,10 +134,10 @@ def augment_data(state_flat, policy, transform_type):
 
 def augment_data_17plane(state_17, policy, transform_type):
     """
-    Augment a 17-plane AlphaZero state and its policy vector.
+    Augment a multi-plane Go input tensor and its policy vector.
 
     Args:
-        state_17:      np.ndarray of shape (17, BOARD_SIZE, BOARD_SIZE)
+        state_17:      np.ndarray of shape (C, BOARD_SIZE, BOARD_SIZE)
         policy:        np.ndarray of shape (ACTION_SIZE,) — MCTS visit probabilities
         transform_type: one of the strings returned by get_augmentations()
 

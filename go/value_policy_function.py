@@ -3,7 +3,7 @@ from config import Config as cfg
 import torch
 import numpy as np
 from model import NeuralNetwork
-from game import board_to_canonical_17, board_to_planes_17_with_history, NUM_POSITIONS
+from game import board_to_planes_17_with_history, NUM_POSITIONS
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -91,7 +91,7 @@ class ValuePolicyNetwork:
             state: Game state array in absolute form (Black=+1, White=-1)
             player: Current player (1=Black, -1=White)
             node: Optional MCTS node; when provided, history is built from the
-                  parent chain + _game_hist for full 17-plane input.
+                  parent chain + _game_hist for the full input tensor.
 
         Returns:
             value: Position evaluation (float)
@@ -100,7 +100,7 @@ class ValuePolicyNetwork:
         hist = self._build_history(node) if node is not None else []
         planes = board_to_planes_17_with_history(state, player, hist)
 
-        # Convert to tensor and add batch dimension: (17, B, B) -> (1, 17, B, B)
+        # Convert to tensor and add batch dimension: (C, B, B) -> (1, C, B, B)
         state_tensor = torch.from_numpy(planes).unsqueeze(0).to(device)
 
         with torch.no_grad():
@@ -130,7 +130,7 @@ class ValuePolicyNetwork:
         if len(states) == 0:
             return [], []
 
-        # Convert all states to 17-plane representation (with history if available)
+        # Convert all states to the full input representation (with history if available)
         if nodes is not None:
             canonical_states = np.stack([
                 board_to_planes_17_with_history(state, player, self._build_history(node))
@@ -142,7 +142,7 @@ class ValuePolicyNetwork:
                 for state, player in zip(states, players)
             ])
 
-        # Convert to tensor: (batch, 17, B, B)
+        # Convert to tensor: (batch, C, B, B)
         state_tensor = torch.from_numpy(canonical_states).to(device)
 
         with torch.no_grad():

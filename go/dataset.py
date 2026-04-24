@@ -30,7 +30,7 @@ class GoDataset:
             values[i] = datapoint[3]
             policies[i] = datapoint[1]
             if isinstance(state, np.ndarray) and state.ndim == 3:
-                # Pre-computed 17-plane state from C++ selfplay — use directly.
+                # Pre-computed input tensor from C++ selfplay — use directly.
                 canonical_list.append(state.astype(np.float32))
             else:
                 # Legacy flat board state — convert to 3-plane canonical.
@@ -53,7 +53,7 @@ class GoDataset:
         if self.use_augmentation and random.random() < 0.5:
             transform_type = random.choice(self.augmentations)
             if is_precomputed_3d:
-                # 17-plane C++ selfplay data — augment all planes in one call.
+                # Precomputed C++ selfplay tensor — augment all planes in one call.
                 aug_state, aug_p = augment_data_17plane(
                     state_raw, self.policies[index].numpy(), transform_type
                 )
@@ -105,18 +105,18 @@ class TrainingDataset:
         """Load positions produced by selfplay_cpp from .npy files.
 
         Reads:
-          <npy_dir>/states.npy    (N, 17, BOARD_SIZE, BOARD_SIZE)  float32
+          <npy_dir>/states.npy    (N, C, BOARD_SIZE, BOARD_SIZE)  float32
           <npy_dir>/policies.npy  (N, ACTION_SIZE)                  float32
           <npy_dir>/values.npy    (N,)                              float32
 
-        States are stored as pre-computed (17, B, B) tensors; GoDataset uses
+        States are stored as pre-computed (C, B, B) tensors; GoDataset uses
         them directly without calling board_to_canonical_3d.  Plane 16 encodes
         color-to-play (1.0 = Black, 0.0 = White).
 
         Any additional files (ownership.npy, scores.npy) are silently ignored.
         """
         import os as _os
-        states   = np.load(_os.path.join(npy_dir, 'states.npy'))    # (N, 17, BOARD_SIZE, BOARD_SIZE)
+        states   = np.load(_os.path.join(npy_dir, 'states.npy'))    # (N, C, BOARD_SIZE, BOARD_SIZE)
         policies = np.load(_os.path.join(npy_dir, 'policies.npy'))  # (N, ACTION_SIZE)
         values   = np.load(_os.path.join(npy_dir, 'values.npy'))    # (N,)
 
@@ -127,7 +127,7 @@ class TrainingDataset:
             # Plane 16 encodes color-to-play: 1.0 = Black (+1), 0.0 = White (-1).
             color = 1 if states[i, 16, 0, 0] > 0.5 else -1
             self.training_dataset.append([
-                states[i],           # (17, 9, 9) pre-computed canonical planes
+                states[i],           # (C, B, B) pre-computed input planes
                 policies[i],         # (82,) MCTS visit probabilities
                 color,               # current player (+1 or -1)
                 float(values[i]),    # game outcome from current player's perspective

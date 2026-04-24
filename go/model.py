@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-from config import Config as cfg, BOARD_SIZE, NUM_POSITIONS, ACTION_SIZE
+from config import Config as cfg, BOARD_SIZE, NUM_POSITIONS, ACTION_SIZE, NN_INPUT_PLANES
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using {device} device")
@@ -52,8 +52,8 @@ class NeuralNetwork(nn.Module):
         # Policy head channels
         policy_conv_channels = 32 if BOARD_SIZE <= 5 else 64
 
-        # Initial convolution: 17 input planes (AlphaZero: 8 history per player + color-to-play)
-        self.conv_init = nn.Conv2d(17, self.channels, kernel_size=3, padding=1, bias=False)
+        # Input planes: 8 history planes per side + color + current liberties + ko.
+        self.conv_init = nn.Conv2d(NN_INPUT_PLANES, self.channels, kernel_size=3, padding=1, bias=False)
         self.bn_init = nn.BatchNorm2d(self.channels)
 
         # Residual tower
@@ -78,7 +78,7 @@ class NeuralNetwork(nn.Module):
         self.policy_fc = nn.Linear(policy_fc_input, ACTION_SIZE)
 
     def forward(self, x):
-        # x shape: (batch, 17, BOARD_SIZE, BOARD_SIZE)
+        # x shape: (batch, NN_INPUT_PLANES, BOARD_SIZE, BOARD_SIZE)
 
         # Initial convolution
         x = F.relu(self.bn_init(self.conv_init(x)))
@@ -120,7 +120,7 @@ if __name__ == "__main__":
 
     # Test forward pass
     batch_size = 4
-    x = torch.randn(batch_size, 17, BOARD_SIZE, BOARD_SIZE)
+    x = torch.randn(batch_size, NN_INPUT_PLANES, BOARD_SIZE, BOARD_SIZE)
     v, p = net(x)
     print(f"\nTest forward pass:")
     print(f"  Input shape: {x.shape}")

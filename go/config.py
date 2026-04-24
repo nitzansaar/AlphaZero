@@ -277,6 +277,7 @@ NUM_POSITIONS = Config.NUM_POSITIONS
 PASS_ACTION = Config.PASS_ACTION
 ACTION_SIZE = Config.ACTION_SIZE
 KOMI = Config.KOMI
+NN_INPUT_PLANES = 21
 
 
 def get_config(board_size=None):

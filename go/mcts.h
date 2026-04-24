@@ -70,12 +70,13 @@ struct Node {
 struct NodePool {
     Node nodes[NODE_POOL_SIZE];
     int  next_free;
+    bool suppress_pass;  /* set per-move by selfplay; masks pass at root only */
 };
 
 /* ── Neural-network evaluation callback ──────────────────────────────────
  *
- * planes:     batch_size × 17 × NUM_POSITIONS floats (AlphaZero 17-plane form
- *             produced by go_board_to_planes_17_with_history)
+ * planes:     batch_size × GO_NN_INPUT_PLANES × NUM_POSITIONS floats
+ *             produced by go_board_to_planes_17_with_history
  * batch_size: number of boards in the batch
  * values:     [out] batch_size floats  (scalar value in [-1, 1])
  * policies:   [out] batch_size × ACTION_SIZE floats (softmax probabilities)
