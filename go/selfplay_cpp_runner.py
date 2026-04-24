@@ -176,6 +176,7 @@ if __name__ == "__main__":
                 "--seed",           str(i * 1000),
                 "--full-prob",      str(cfg.PLAYOUT_CAP_PROB),
                 "--fast-sims",      str(cfg.FAST_SIMS),
+                "--min-pass-move",  str(getattr(cfg, 'MIN_PASS_MOVE', 0)),
             ]
             if USE_CUDA:
                 cmd.append("--cuda")
