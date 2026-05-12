@@ -1,24 +1,25 @@
 """
-Configuration for AlphaZero Go implementation.
-Supports multiple board sizes (5x5, 9x9, 19x19).
+Configuration for the AlphaZero-style Go training loop.
+
+19x19 is the default training target. Smaller-board configs remain available
+only for explicit legacy/debug runs via BOARD_SIZE.
 
 Usage:
     from config import Config as cfg, BOARD_SIZE, NUM_POSITIONS, PASS_ACTION, ACTION_SIZE
 
     # Access settings
-    print(cfg.BOARD_SIZE)  # 5, 9, or 19
-    print(cfg.NUM_SIMULATIONS)  # Scaled for board size
+    print(cfg.BOARD_SIZE)
+    print(cfg.NUM_SIMULATIONS)
 
 To change board size, set environment variable before importing:
     BOARD_SIZE=9 python train.py
-
-Or modify the defaults below.
 """
 
 import os
 
-# Default board size - change this or use BOARD_SIZE env var
-DEFAULT_BOARD_SIZE = int(os.environ.get('BOARD_SIZE', '9'))
+# Default to the real training target. Use BOARD_SIZE only for explicit legacy
+# or debugging runs.
+DEFAULT_BOARD_SIZE = int(os.environ.get('BOARD_SIZE', '19'))
 
 
 class Config5x5:
@@ -66,9 +67,6 @@ class Config5x5:
     # Temperature for exploration
     TEMP_THRESHOLD = 6
     INITIAL_TEMP = 1.0
-
-    # Pass suppression during self-play (training heuristic, not a rule change)
-    MIN_PASS_MOVE = 0  # disabled — 5x5 games are very short
 
     # Data augmentation
     USE_AUGMENTATION = True
@@ -146,9 +144,6 @@ class Config9x9Base:
     TEMP_THRESHOLD = 15  # Opening moves with temp=1; rest greedy (~17% of ~90-move game)
     INITIAL_TEMP = 1.0
 
-    # Pass suppression during self-play (training heuristic, not a rule change)
-    MIN_PASS_MOVE = 0   # suppress pass at root for first 80 half-moves (~40 per player)
-
     # Data augmentation
     USE_AUGMENTATION = True
 
@@ -184,43 +179,52 @@ class Config19x19Base:
     # Komi — standard 19x19 tournament komi
     KOMI = 7.5
 
-    # Training — more steps and larger buffer for bigger action space
-    BATCH_SIZE = 128
-    TRAIN_STEPS = 1000
-    SELFPLAY_GAMES = 500
-    LEARNING_RATE = 0.001
+    # Training
+    BATCH_SIZE = 512
+    TRAIN_STEPS = 1500
+    SELFPLAY_GAMES = 1000
+    LEARNING_RATE = 0.01
     WEIGHT_DECAY = 1e-4
     MOMENTUM = 0.9
     LR_DECAY_ITERS = [30, 60, 200, 400, 700]
+    LR_DECAY_STEPS = [400_000, 600_000]
     LR_DECAY_FACTOR = 0.1
 
-    NUM_SIMULATIONS = 600
+    NUM_SIMULATIONS = 1600
     MCTS_UCB_C = 1.414
     PLAYOUT_CAP_PROB = 0.25
     FAST_SIMS = 100
 
+    # Self-play resignation.  RESIGN_THRESHOLD is a positive margin: resign
+    # when MCTS root Q for the player to move drops below -RESIGN_THRESHOLD.
+    # Disable in a fraction of games so the loop still produces full-game
+    # samples for spotting false resignations, as AlphaGo Zero did.
+    RESIGN_THRESHOLD = -1.0
+    RESIGN_MIN_MOVE = 80
+    RESIGN_DISABLE_PROB = 0.10
+    RESIGN_AUTO_ADJUST = True
+    RESIGN_TARGET_FALSE_POSITIVE_RATE = 0.05
+    RESIGN_ADJUST_STEP = 0.02
+    RESIGN_THRESHOLD_MIN = 0.80
+    RESIGN_THRESHOLD_MAX = 0.99
+    RESIGN_MIN_ADJUST_SAMPLES = 20
+    RESIGN_STATE_FILE = "resign_threshold_state.json"
+
     # Network — deeper for 19x19
-    NUM_RES_BLOCKS = 15
+    NUM_RES_BLOCKS = 20
     NUM_CHANNELS = 256
-    VALUE_HEAD_HIDDEN = 512
+    VALUE_HEAD_HIDDEN = 256
 
     DATASET_QUEUE_SIZE = 500_000
+    DATA_LOADER_WORKERS = 0
 
-    # Loss weights — value loss is scaled up to match the policy cross-entropy
-    # magnitude (~0.5 raw vs ~5.0 raw), so both heads contribute equally to
-    # the shared backbone gradient.  POLICY_LR_MULTIPLIER is kept at 1.0
-    # because the loss-weight balance already achieves the desired signal ratio;
-    # a separate per-head LR multiplier would overcorrect.
     VALUE_LOSS_WEIGHT = 5.0
     POLICY_LOSS_WEIGHT = 1.0
     POLICY_LR_MULTIPLIER = 1.0
 
-    # Temperature — first 30 moves exploratory (~10% of a 300-move game)
+    # Temperature — first 30 moves exploratory
     TEMP_THRESHOLD = 30
     INITIAL_TEMP = 1.0
-
-    # Pass suppression during self-play (training heuristic, not a rule change)
-    MIN_PASS_MOVE = 80   # suppress pass at root for first 80 half-moves (~40 per player)
 
     # Data augmentation
     USE_AUGMENTATION = True
@@ -231,19 +235,26 @@ class Config19x19Base:
     GATE_SIMULATIONS = 200
     GATE_TEMPERATURE_MOVES = 4
 
-    # None → use all CPU cores (os.cpu_count()).
-    NUM_SELFPLAY_WORKERS = None
+    # C++ MCTS knobs. AlphaZero's 19x19 root Dirichlet alpha is per action,
+    # not scaled by board size.
+    MCTS_DIRICHLET_ALPHA = 0.03
+    MCTS_DIRICHLET_FRACTION = 0.25
 
-    # Max moves per selfplay game; 19x19 games average 250-350 moves
-    MAX_MOVES = 500
+    # 19x19 workers allocate a large MCTS node pool and, with CUDA enabled,
+    # each process owns a CUDA context. This cap fits the current 24-core,
+    # 32GB-VRAM training machine while leaving headroom.
+    NUM_SELFPLAY_WORKERS = 16
+
+    # Max moves per selfplay game; 19x19x2=722
+    MAX_MOVES = 722
 
     # Paths
-    SAVE_MODEL_PATH = "models_19x19_base"
-    SAVE_PICKLES = "pickles_19x19_base"
-    DATASET_PATH = "training_dataset.pkl"
+    SAVE_MODEL_PATH = "models_19x19_az20"
+    SAVE_PICKLES = "pickles_19x19_az20"
+    DATASET_PATH = "training_dataset.npz"
     BEST_MODEL = "{}_best_model.pt"
-    LOGDIR = "logs_19x19_base"
-    TEST_OUTPUT_PATH = "test_output_19x19_base"
+    LOGDIR = "logs_19x19_az20"
+    TEST_OUTPUT_PATH = "test_output_19x19_az20"
 
     # Evaluation
     EVAL_GAMES = 40
@@ -270,6 +281,32 @@ if not hasattr(Config, 'MAX_MOVES'):
     Config.MAX_MOVES = 200               # existing 9x9 default
 if not hasattr(Config, 'POLICY_LR_MULTIPLIER'):
     Config.POLICY_LR_MULTIPLIER = 1.0   # 5x5 has no per-head LR boost
+if not hasattr(Config, 'RESIGN_THRESHOLD'):
+    Config.RESIGN_THRESHOLD = -1.0       # negative disables resignation
+if not hasattr(Config, 'RESIGN_MIN_MOVE'):
+    Config.RESIGN_MIN_MOVE = 0
+if not hasattr(Config, 'RESIGN_DISABLE_PROB'):
+    Config.RESIGN_DISABLE_PROB = 0.0
+if not hasattr(Config, 'RESIGN_AUTO_ADJUST'):
+    Config.RESIGN_AUTO_ADJUST = False
+if not hasattr(Config, 'RESIGN_TARGET_FALSE_POSITIVE_RATE'):
+    Config.RESIGN_TARGET_FALSE_POSITIVE_RATE = 0.05
+if not hasattr(Config, 'RESIGN_ADJUST_STEP'):
+    Config.RESIGN_ADJUST_STEP = 0.02
+if not hasattr(Config, 'RESIGN_THRESHOLD_MIN'):
+    Config.RESIGN_THRESHOLD_MIN = 0.80
+if not hasattr(Config, 'RESIGN_THRESHOLD_MAX'):
+    Config.RESIGN_THRESHOLD_MAX = 0.99
+if not hasattr(Config, 'RESIGN_MIN_ADJUST_SAMPLES'):
+    Config.RESIGN_MIN_ADJUST_SAMPLES = 20
+if not hasattr(Config, 'RESIGN_STATE_FILE'):
+    Config.RESIGN_STATE_FILE = "resign_threshold_state.json"
+if not hasattr(Config, 'DATA_LOADER_WORKERS'):
+    Config.DATA_LOADER_WORKERS = 8
+if not hasattr(Config, 'MCTS_DIRICHLET_ALPHA'):
+    Config.MCTS_DIRICHLET_ALPHA = 0.03 * Config.BOARD_SIZE
+if not hasattr(Config, 'MCTS_DIRICHLET_FRACTION'):
+    Config.MCTS_DIRICHLET_FRACTION = 0.25
 
 # Export commonly used constants at module level for convenience
 BOARD_SIZE = Config.BOARD_SIZE
@@ -311,6 +348,12 @@ def print_config():
     print(f"MCTS:")
     print(f"  Simulations: {Config.NUM_SIMULATIONS}")
     print(f"  UCB C: {Config.MCTS_UCB_C}")
+    if Config.RESIGN_THRESHOLD >= 0:
+        print(f"  Resign: Q < -{Config.RESIGN_THRESHOLD} after move {Config.RESIGN_MIN_MOVE}")
+        print(f"  No-resign Games: {Config.RESIGN_DISABLE_PROB:.0%}")
+        print(f"  Auto Resign Threshold: {'on' if Config.RESIGN_AUTO_ADJUST else 'off'}")
+    else:
+        print(f"  Resign: off")
     print(f"")
     print(f"Paths:")
     print(f"  Models: {Config.SAVE_MODEL_PATH}")

@@ -9,8 +9,10 @@
 /* ── RNG (thread-local so each worker thread gets an independent stream) ─ */
 
 static thread_local std::mt19937 s_rng(42);
+float g_mcts_c_puct = 1.414f;
 
 void mcts_seed_rng(uint32_t seed) { s_rng.seed(seed); }
+void mcts_set_c_puct(float c_puct) { if (c_puct > 0.0f) g_mcts_c_puct = c_puct; }
 
 /* ── Pool helpers ─────────────────────────────────────────────────────── */
 
@@ -82,7 +84,7 @@ static int select_best_child(const NodePool *pool, int node_idx)
             Q = 0.0f;
         }
 
-        float U = -Q + MCTS_C_PUCT * child->prior * sqrtNs / (1.0f + (float)Nsa);
+        float U = -Q + g_mcts_c_puct * child->prior * sqrtNs / (1.0f + (float)Nsa);
 
         if (U > best_score) {
             best_score  = U;
@@ -111,11 +113,19 @@ static void expand_node(NodePool *pool, int node_idx,
     float valid[ACTION_SIZE];
     go_get_valid_moves(&node->state, 1, valid);
 
+    /* Renormalise: sum policy mass over valid moves so priors sum to 1.
+     * Without this, the exploration term C*P*sqrt(N)/(1+n) is deflated by
+     * however much probability the network assigned to illegal moves. */
+    float prior_sum = 0.0f;
+    for (int a = 0; a < ACTION_SIZE; a++)
+        prior_sum += policy[a] * valid[a];
+    float scale = (prior_sum > 0.0f) ? 1.0f / prior_sum : 1.0f;
+
     for (int a = 0; a < ACTION_SIZE; a++) {
         float prob = policy[a] * valid[a];
         if (prob <= 0.0f) continue;
         int child_idx = pool_alloc(pool);
-        node_init(&pool->nodes[child_idx], prob, next_player, node_idx, a);
+        node_init(&pool->nodes[child_idx], prob * scale, next_player, node_idx, a);
         node->children[a] = child_idx;
         node->num_children++;
     }
@@ -124,18 +134,21 @@ static void expand_node(NodePool *pool, int node_idx,
 /* ── Dirichlet noise ──────────────────────────────────────────────────── */
 
 /*
- * Mix Dirichlet(DIR_ALPHA) noise into root child priors.
+ * Mix Dirichlet noise into root child priors.
  * Mirrors the noise block in run_simulation_batched.
  *
- * new_prior[a] = (0.75 * prior[a] + 0.25 * noise[a]) * valid[a]
+ * new_prior[a] = ((1 - noise_frac) * prior[a] + noise_frac * noise[a]) * valid[a]
  * then renormalised so the priors of valid children sum to 1.
  */
-static void add_dirichlet_noise(NodePool *pool, int root_idx)
+static void add_dirichlet_noise(NodePool *pool, int root_idx,
+                                float noise_alpha, float noise_frac)
 {
     Node *root = &pool->nodes[root_idx];
     if (root->num_children == 0) return;
+    if (noise_alpha <= 0.0f || noise_frac <= 0.0f) return;
+    if (noise_frac > 1.0f) noise_frac = 1.0f;
 
-    std::gamma_distribution<float> gamma(DIR_ALPHA, 1.0f);
+    std::gamma_distribution<float> gamma(noise_alpha, 1.0f);
 
     float noise[ACTION_SIZE] = {};
     float noise_sum = 0.0f;
@@ -154,7 +167,7 @@ static void add_dirichlet_noise(NodePool *pool, int root_idx)
         if (child_idx < 0) continue;
         Node *child  = &pool->nodes[child_idx];
         float n      = noise[a] / noise_sum;
-        child->prior = (1.0f - DIR_FRAC) * child->prior + DIR_FRAC * n;
+        child->prior = (1.0f - noise_frac) * child->prior + noise_frac * n;
         new_sum     += child->prior;
     }
 
@@ -297,7 +310,8 @@ static int collect_leaf_history(const NodePool *pool, int leaf_idx,
  */
 void mcts_simulate(NodePool *pool, NNEvalFn nn_fn,
                    int num_simulations, int batch_size, bool add_noise,
-                   const GoState *game_hist, int game_hist_len)
+                   const GoState *game_hist, int game_hist_len,
+                   float noise_alpha, float noise_frac)
 {
     assert(batch_size <= MAX_BATCH_SIZE);
 
@@ -319,7 +333,7 @@ void mcts_simulate(NodePool *pool, NNEvalFn nn_fn,
         expand_node(pool, 0, root_policy, -root->player);
 
         if (add_noise)
-            add_dirichlet_noise(pool, 0);
+            add_dirichlet_noise(pool, 0, noise_alpha, noise_frac);
     }
 
     /* ── Step 2: simulation loop ──────────────────────────────────────── */

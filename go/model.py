@@ -1,19 +1,27 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-from config import Config as cfg, BOARD_SIZE, NUM_POSITIONS, ACTION_SIZE
+from config import Config as cfg, BOARD_SIZE, ACTION_SIZE
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using {device} device")
+
+INPUT_PLANES = 17
+POLICY_HEAD_CHANNELS = 2
+VALUE_HEAD_CHANNELS = 1
 
 
 class ResBlock(nn.Module):
     """Residual block with batch normalization."""
     def __init__(self, channels):
         super().__init__()
-        self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False)
+        self.conv1 = nn.Conv2d(
+            channels, channels, kernel_size=3, stride=1, padding=1, bias=False
+        )
         self.bn1 = nn.BatchNorm2d(channels)
-        self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False)
+        self.conv2 = nn.Conv2d(
+            channels, channels, kernel_size=3, stride=1, padding=1, bias=False
+        )
         self.bn2 = nn.BatchNorm2d(channels)
 
     def forward(self, x):
@@ -26,19 +34,14 @@ class ResBlock(nn.Module):
 
 class NeuralNetwork(nn.Module):
     """
-    Neural network for Go (supports multiple board sizes).
+    AlphaGo Zero policy/value network for the configured board size.
 
-    Architecture inspired by AlphaGo Zero:
-    - Initial convolution to expand channels
-    - Stack of residual blocks for pattern recognition
-    - Separate value and policy heads
-
-    Network size scales with board size via config:
-    - 5x5: 6 res blocks, 128 channels
-    - 9x9: 10 res blocks, 256 channels
+    The default config is 19x19 with 20 residual blocks and 256 tower channels.
+    This module does not choose small-board defaults; it reads the active config
+    selected by BOARD_SIZE, which defaults to 19.
     """
     def __init__(self, num_res_blocks=None, channels=None, value_hidden=None):
-        super(NeuralNetwork, self).__init__()
+        super().__init__()
 
         # Use config values if not specified
         self.num_res_blocks = num_res_blocks if num_res_blocks is not None else cfg.NUM_RES_BLOCKS
@@ -46,14 +49,17 @@ class NeuralNetwork(nn.Module):
         self.value_hidden = value_hidden if value_hidden is not None else cfg.VALUE_HEAD_HIDDEN
         self.board_size = BOARD_SIZE
 
-        # Value head intermediate channels (scales with board size)
-        value_conv_channels = 64 if BOARD_SIZE <= 5 else 128
+        self.input_planes = INPUT_PLANES
 
-        # Policy head channels
-        policy_conv_channels = 32 if BOARD_SIZE <= 5 else 64
-
-        # Initial convolution: 17 input planes (AlphaZero: 8 history per player + color-to-play)
-        self.conv_init = nn.Conv2d(17, self.channels, kernel_size=3, padding=1, bias=False)
+        # AlphaGo Zero input: 8 history planes per player plus color-to-play.
+        self.conv_init = nn.Conv2d(
+            self.input_planes,
+            self.channels,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=False,
+        )
         self.bn_init = nn.BatchNorm2d(self.channels)
 
         # Residual tower
@@ -62,19 +68,30 @@ class NeuralNetwork(nn.Module):
         ])
 
         # Value head
-        self.value_conv_channels = value_conv_channels
-        self.value_conv = nn.Conv2d(self.channels, value_conv_channels, kernel_size=1, bias=False)
-        self.value_bn = nn.BatchNorm2d(value_conv_channels)
-        value_fc_input = value_conv_channels * BOARD_SIZE * BOARD_SIZE
+        self.value_conv_channels = VALUE_HEAD_CHANNELS
+        self.value_conv = nn.Conv2d(
+            self.channels,
+            self.value_conv_channels,
+            kernel_size=1,
+            stride=1,
+            bias=False,
+        )
+        self.value_bn = nn.BatchNorm2d(self.value_conv_channels)
+        value_fc_input = self.value_conv_channels * BOARD_SIZE * BOARD_SIZE
         self.value_fc1 = nn.Linear(value_fc_input, self.value_hidden)
-        self.value_fc2 = nn.Linear(self.value_hidden, self.value_hidden // 4)
-        self.value_fc3 = nn.Linear(self.value_hidden // 4, 1)
+        self.value_fc2 = nn.Linear(self.value_hidden, 1)
 
         # Policy head
-        self.policy_conv_channels = policy_conv_channels
-        self.policy_conv = nn.Conv2d(self.channels, policy_conv_channels, kernel_size=1, bias=False)
-        self.policy_bn = nn.BatchNorm2d(policy_conv_channels)
-        policy_fc_input = policy_conv_channels * BOARD_SIZE * BOARD_SIZE
+        self.policy_conv_channels = POLICY_HEAD_CHANNELS
+        self.policy_conv = nn.Conv2d(
+            self.channels,
+            self.policy_conv_channels,
+            kernel_size=1,
+            stride=1,
+            bias=False,
+        )
+        self.policy_bn = nn.BatchNorm2d(self.policy_conv_channels)
+        policy_fc_input = self.policy_conv_channels * BOARD_SIZE * BOARD_SIZE
         self.policy_fc = nn.Linear(policy_fc_input, ACTION_SIZE)
 
     def forward(self, x):
@@ -91,8 +108,7 @@ class NeuralNetwork(nn.Module):
         v = F.relu(self.value_bn(self.value_conv(x)))
         v = v.view(v.size(0), -1)  # Flatten
         v = F.relu(self.value_fc1(v))
-        v = F.relu(self.value_fc2(v))
-        v = torch.tanh(self.value_fc3(v))
+        v = torch.tanh(self.value_fc2(v))
 
         # Policy head
         p = F.relu(self.policy_bn(self.policy_conv(x)))
@@ -107,8 +123,11 @@ class NeuralNetwork(nn.Module):
     def print_architecture(self):
         """Print network architecture summary."""
         print(f"Network Architecture for {self.board_size}x{self.board_size} Go")
+        print(f"  Input planes: {self.input_planes}")
         print(f"  Residual blocks: {self.num_res_blocks}")
         print(f"  Channels: {self.channels}")
+        print(f"  Policy head filters: {self.policy_conv_channels}")
+        print(f"  Value head filters: {self.value_conv_channels}")
         print(f"  Value head hidden: {self.value_hidden}")
         print(f"  Total parameters: {self.count_parameters():,}")
 
@@ -120,7 +139,7 @@ if __name__ == "__main__":
 
     # Test forward pass
     batch_size = 4
-    x = torch.randn(batch_size, 17, BOARD_SIZE, BOARD_SIZE)
+    x = torch.randn(batch_size, INPUT_PLANES, BOARD_SIZE, BOARD_SIZE)
     v, p = net(x)
     print(f"\nTest forward pass:")
     print(f"  Input shape: {x.shape}")

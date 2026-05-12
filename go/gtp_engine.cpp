@@ -6,6 +6,7 @@
  *
  * Usage:
  *   ./gtp_engine <model_ts.pt> [--sims N] [--batch N] [--cuda]
+ *               [--add-noise] [--noise-alpha F] [--noise-frac F]
  *               [--resign-threshold F]
  *
  * Sabaki:
@@ -127,6 +128,9 @@ struct Engine {
     /* MCTS settings */
     int   num_sims;
     int   batch_size;
+    bool  add_noise;
+    float noise_alpha;
+    float noise_frac;
     float resign_threshold;   /* resign when root Q < -threshold; <0 = off */
 
     /* NN and node pool (owned by main) */
@@ -139,6 +143,18 @@ static void engine_clear(Engine &eng)
     eng.state  = go_initial_state();
     eng.player = 1;   /* Black moves first */
     eng.history.clear();
+}
+
+static GoState state_oriented_to_player(const GoState &state,
+                                        int current_player,
+                                        int requested_player)
+{
+    GoState oriented = state;
+    if (requested_player != current_player) {
+        for (int i = 0; i < NUM_POSITIONS; i++)
+            oriented.board[i] = (int8_t)(-oriented.board[i]);
+    }
+    return oriented;
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -250,8 +266,9 @@ static int run_genmove(Engine &eng)
 
     mcts_init_root(eng.pool, &eng.state, eng.player);
     mcts_simulate(eng.pool, nn_callback,
-                  eng.num_sims, eng.batch_size, /*add_noise=*/false,
-                  gtp_hist, ghlen);
+                  eng.num_sims, eng.batch_size, eng.add_noise,
+                  gtp_hist, ghlen,
+                  eng.noise_alpha, eng.noise_frac);
 
     /* Optional resign check on root Q. */
     if (eng.resign_threshold >= 0.0f) {
@@ -335,38 +352,44 @@ static void handle_command(Engine                          &eng,
         if (action == -1) { gtp_err(id, "invalid vertex"); return; }
         if (action == -2) { gtp_err(id, "resign is not a valid play move"); return; }
 
+        GoState oriented = state_oriented_to_player(eng.state, eng.player, color);
+
         eng.history.push_back({eng.state, eng.player});
-
-        /* If a different color plays than whose turn it is, flip the
-         * canonical board to the correct perspective first. */
-        if (color != eng.player) {
-            for (int i = 0; i < NUM_POSITIONS; i++)
-                eng.state.board[i] = (int8_t)(-eng.state.board[i]);
-            eng.player = color;
-        }
-
-        eng.state  = go_next_state_canonical(&eng.state, action);
-        eng.player = -eng.player;
+        eng.state  = go_next_state_canonical(&oriented, action);
+        eng.player = -color;
         gtp_ok(id);
 
     } else if (cmd == "genmove" || cmd == "reg_genmove") {
         if (args.empty()) { gtp_err(id, "missing color"); return; }
-        if (parse_color(args[0]) == 0) { gtp_err(id, "invalid color"); return; }
+        int color = parse_color(args[0]);
+        if (color == 0) { gtp_err(id, "invalid color"); return; }
+
+        GoState before_state = eng.state;
+        int before_player = eng.player;
+        eng.state = state_oriented_to_player(eng.state, eng.player, color);
+        eng.player = color;
 
         int action = run_genmove(eng);
 
         if (action == -2) {
             /* Resign: record the move but don't update the board state. */
             if (cmd == "genmove")
-                eng.history.push_back({eng.state, eng.player});
+                eng.history.push_back({before_state, before_player});
+            else {
+                eng.state = before_state;
+                eng.player = before_player;
+            }
             gtp_ok(id, "resign");
             return;
         }
 
         if (cmd == "genmove") {
-            eng.history.push_back({eng.state, eng.player});
+            eng.history.push_back({before_state, before_player});
             eng.state  = go_next_state_canonical(&eng.state, action);
             eng.player = -eng.player;
+        } else {
+            eng.state = before_state;
+            eng.player = before_player;
         }
         /* reg_genmove returns the move without playing it. */
         gtp_ok(id, action_to_gtp(action));
@@ -452,6 +475,9 @@ static void usage(const char *prog)
         "  --sims  N              MCTS simulations per move  (default: 800)\n"
         "  --batch N              NN leaf-batch size          (default: 32)\n"
         "  --cuda                 use GPU for NN inference\n"
+        "  --add-noise            add Dirichlet noise to root priors\n"
+        "  --noise-alpha F        Dirichlet alpha             (default: 0.03*BOARD_SIZE)\n"
+        "  --noise-frac F         root prior noise fraction   (default: 0.25)\n"
         "  --resign-threshold F   resign when root Q < -F    (default: off)\n"
         "\n"
         "Communicates via GTP v2 on stdin/stdout.\n"
@@ -467,6 +493,9 @@ int main(int argc, char *argv[])
     Engine eng;
     eng.num_sims         = 800;
     eng.batch_size       = 32;
+    eng.add_noise        = false;
+    eng.noise_alpha      = DIR_ALPHA;
+    eng.noise_frac       = DIR_FRAC;
     eng.resign_threshold = -1.0f;   /* disabled */
     eng.komi             = KOMI;
     eng.nn               = nullptr;
@@ -482,6 +511,16 @@ int main(int argc, char *argv[])
             eng.batch_size = atoi(argv[++i]);
         else if (strcmp(argv[i], "--cuda")  == 0)
             use_cuda = true;
+        else if (strcmp(argv[i], "--add-noise") == 0)
+            eng.add_noise = true;
+        else if (strcmp(argv[i], "--noise-alpha") == 0 && i+1 < argc) {
+            eng.noise_alpha = (float)atof(argv[++i]);
+            eng.add_noise = true;
+        }
+        else if (strcmp(argv[i], "--noise-frac") == 0 && i+1 < argc) {
+            eng.noise_frac = (float)atof(argv[++i]);
+            eng.add_noise = true;
+        }
         else if (strcmp(argv[i], "--resign-threshold") == 0 && i+1 < argc)
             eng.resign_threshold = (float)atof(argv[++i]);
         else {
@@ -506,6 +545,10 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Model : %s\n", model_path.c_str());
     fprintf(stderr, "Sims  : %d\n", eng.num_sims);
     fprintf(stderr, "Batch : %d\n", eng.batch_size);
+    fprintf(stderr, "Noise : %s\n", eng.add_noise ? "yes" : "no");
+    if (eng.add_noise)
+        fprintf(stderr, "Noise params: alpha=%.4f frac=%.4f\n",
+                eng.noise_alpha, eng.noise_frac);
     fprintf(stderr, "CUDA  : %s\n", use_cuda ? "yes" : "no");
     if (eng.resign_threshold >= 0.0f)
         fprintf(stderr, "Resign: Q < -%.2f\n", eng.resign_threshold);

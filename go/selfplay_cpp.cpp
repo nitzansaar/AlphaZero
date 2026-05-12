@@ -45,12 +45,22 @@ struct Timings {
     double move_selection  = 0.0;  /* mcts_select_move                   */
     double state_copy      = 0.0;  /* board_to_planes + next_state       */
     double winner_check    = 0.0;  /* go_get_winner                      */
+    long long total_game_moves = 0; /* total moves across completed games */
+    int    completed_games = 0;     /* games counted for move statistics  */
+    int    resignations    = 0;    /* self-play games ended by resign    */
+    int    resign_disabled_candidates = 0; /* no-resign games that crossed threshold */
+    int    resign_false_positives     = 0; /* candidate loser eventually won          */
 
     void operator+=(const Timings &o) {
         mcts_simulation += o.mcts_simulation;
         move_selection  += o.move_selection;
         state_copy      += o.state_copy;
         winner_check    += o.winner_check;
+        total_game_moves += o.total_game_moves;
+        completed_games += o.completed_games;
+        resignations    += o.resignations;
+        resign_disabled_candidates += o.resign_disabled_candidates;
+        resign_false_positives     += o.resign_false_positives;
     }
 };
 
@@ -72,7 +82,7 @@ static void nn_callback(const float *planes, int batch_size,
 struct Config {
     std::string model_path;
     int      num_games      = 100;
-    int      num_sims       = 600;
+    int      num_sims       = 800;
     int      batch_size     = 32;
     int      num_threads    = 1;
     bool     use_cuda       = false;
@@ -83,6 +93,13 @@ struct Config {
     /* Playout cap randomization */
     float    full_prob      = 0.25f; /* fraction of turns that use full search */
     int      fast_sims      = 100;  /* simulation budget for non-training (fast) turns       */
+    /* Resign when current player's root Q < -resign_threshold; <0 disables. */
+    float    resign_threshold    = -1.0f;
+    int      resign_min_move     = 0;
+    float    resign_disable_prob = 0.0f;
+    float    c_puct              = 1.414f;
+    float    dirichlet_alpha     = DIR_ALPHA;
+    float    dirichlet_frac      = DIR_FRAC;
 };
 
 static void print_usage(const char *prog)
@@ -102,6 +119,12 @@ static void print_usage(const char *prog)
             "  --seed N         base RNG seed             (default: 42)\n"
             "  --full-prob F    fraction of turns w/ full search (default: 1.0 = disabled)\n"
             "  --fast-sims N    sims for non-training turns       (default: 100)\n"
+            "  --resign-threshold F  resign when root Q < -F       (default: off)\n"
+            "  --resign-min-move N   earliest move to resign       (default: 0)\n"
+            "  --resign-disable-prob F fraction of games with no resignation (default: 0)\n"
+            "  --c-puct F            MCTS exploration constant     (default: 1.414)\n"
+            "  --dirichlet-alpha F   root noise alpha per action   (default: compiled)\n"
+            "  --dirichlet-frac F    root noise mix fraction       (default: 0.25)\n"
             "\n"
             "Output files in DIR:\n"
             "  states.npy    (N, 17, BOARD_SIZE, BOARD_SIZE)  AlphaZero 17-plane repr\n"
@@ -127,10 +150,41 @@ static bool parse_args(int argc, char *argv[], Config &cfg)
         else if (strcmp(argv[i], "--seed")         == 0 && i+1 < argc) cfg.seed       = (uint32_t)atoi(argv[++i]);
         else if (strcmp(argv[i], "--full-prob")    == 0 && i+1 < argc) cfg.full_prob   = (float)atof(argv[++i]);
         else if (strcmp(argv[i], "--fast-sims")    == 0 && i+1 < argc) cfg.fast_sims   = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--resign-threshold") == 0 && i+1 < argc) cfg.resign_threshold = (float)atof(argv[++i]);
+        else if (strcmp(argv[i], "--resign-min-move")  == 0 && i+1 < argc) cfg.resign_min_move = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--resign-disable-prob") == 0 && i+1 < argc) cfg.resign_disable_prob = (float)atof(argv[++i]);
+        else if (strcmp(argv[i], "--c-puct") == 0 && i+1 < argc) cfg.c_puct = (float)atof(argv[++i]);
+        else if (strcmp(argv[i], "--dirichlet-alpha") == 0 && i+1 < argc) cfg.dirichlet_alpha = (float)atof(argv[++i]);
+        else if (strcmp(argv[i], "--dirichlet-frac") == 0 && i+1 < argc) cfg.dirichlet_frac = (float)atof(argv[++i]);
         else {
             fprintf(stderr, "Unknown argument: %s\n", argv[i]);
             return false;
         }
+    }
+
+    if (cfg.resign_threshold > 1.0f) {
+        fprintf(stderr, "--resign-threshold must be <= 1.0, or negative to disable.\n");
+        return false;
+    }
+    if (cfg.resign_min_move < 0) {
+        fprintf(stderr, "--resign-min-move must be >= 0.\n");
+        return false;
+    }
+    if (cfg.resign_disable_prob < 0.0f || cfg.resign_disable_prob > 1.0f) {
+        fprintf(stderr, "--resign-disable-prob must be in [0, 1].\n");
+        return false;
+    }
+    if (cfg.c_puct <= 0.0f) {
+        fprintf(stderr, "--c-puct must be > 0.\n");
+        return false;
+    }
+    if (cfg.dirichlet_alpha < 0.0f) {
+        fprintf(stderr, "--dirichlet-alpha must be >= 0.\n");
+        return false;
+    }
+    if (cfg.dirichlet_frac < 0.0f || cfg.dirichlet_frac > 1.0f) {
+        fprintf(stderr, "--dirichlet-frac must be in [0, 1].\n");
+        return false;
     }
     return true;
 }
@@ -159,6 +213,14 @@ static void play_one_game(NodePool           *pool,
     GoState state       = go_initial_state();
     int absolute_player = 1;   /* Black (absolute) moves first */
     int move_count      = 0;
+    int resigned_winner = 0;    /* +1 Black / -1 White; 0 means no resign */
+    int would_resign_player = 0; /* tracked only in no-resign games */
+    bool resignation_configured = (cfg.resign_threshold >= 0.0f);
+    bool resignation_enabled = resignation_configured;
+    if (resignation_configured && cfg.resign_disable_prob > 0.0f) {
+        std::bernoulli_distribution no_resign_dist(cfg.resign_disable_prob);
+        resignation_enabled = !no_resign_dist(coin_rng);
+    }
 
     /* History ring: [0]=current, [1]=1 move ago, ..., capped at 8 entries. */
     std::deque<GoState> hist;
@@ -189,14 +251,36 @@ static void play_one_game(NodePool           *pool,
          * greedier search purely to advance the game state cheaply. */
         auto tm = Clock::now();
         mcts_init_root(pool, &state, absolute_player);
+        mcts_set_c_puct(cfg.c_puct);
         mcts_simulate(pool, nn_callback,
                       sims, cfg.batch_size, /*add_noise=*/is_full_search,
-                      hist_arr, nhist);
+                      hist_arr, nhist, cfg.dirichlet_alpha, cfg.dirichlet_frac);
         t.mcts_simulation += Dsec(Clock::now() - tm).count();
+
+        /* Optional AlphaZero-style resignation.
+         * Use the root average Q from MCTS, from the current player's
+         * perspective.  Only check full-search turns because shallow fast
+         * turns are intentionally not trusted as training policy targets. */
+        if (resignation_configured && is_full_search && move_count >= cfg.resign_min_move) {
+            const Node *root = &pool->nodes[0];
+            if (root->visits > 0) {
+                float root_q = root->total_value / (float)root->visits;
+                if (root_q < -cfg.resign_threshold) {
+                    if (resignation_enabled) {
+                        resigned_winner = -absolute_player;
+                        t.resignations++;
+                        break;
+                    }
+                    if (would_resign_player == 0) {
+                        would_resign_player = absolute_player;
+                    }
+                }
+            }
+        }
 
         /* Temperature schedule mirrors selfplay.py (unchanged for both turn types). */
         auto ts = Clock::now();
-        float temp = (move_count < cfg.temp_moves) ? 1.0f : 0.1f;
+        float temp = (move_count < cfg.temp_moves) ? 1.0f : 0.0f;
         int action = mcts_select_move(pool, temp, step.probs);
         t.move_selection += Dsec(Clock::now() - ts).count();
 
@@ -225,9 +309,25 @@ static void play_one_game(NodePool           *pool,
      *   absolute (Black=+1) → perspective=-1.
      * So passing absolute_player directly works for both cases.
      */
-    auto tw = Clock::now();
-    int winner = go_get_winner(&state, absolute_player);
-    t.winner_check += Dsec(Clock::now() - tw).count();
+    bool force_ended = !go_game_ended(&state) && resigned_winner == 0;
+    int winner = resigned_winner;
+    if (winner == 0 && !force_ended) {
+        auto tw = Clock::now();
+        winner = go_get_winner(&state, absolute_player);
+        t.winner_check += Dsec(Clock::now() - tw).count();
+    }
+    if (would_resign_player != 0) {
+        t.resign_disabled_candidates++;
+        if (winner == would_resign_player) {
+            t.resign_false_positives++;
+        }
+    }
+    t.completed_games++;
+    t.total_game_moves += move_count;
+
+    /* Force-ended games do not have a reliable terminal result. */
+    if (force_ended)
+        return;
 
     /* Append each step to the caller's buffers with winner-derived value. */
     for (const Step &s : steps) {
@@ -330,6 +430,16 @@ int main(int argc, char *argv[])
     fprintf(stderr, "MaxMoves  : %d\n", cfg.max_moves);
     fprintf(stderr, "FullProb  : %.3f\n", cfg.full_prob);
     fprintf(stderr, "FastSims  : %d\n",  cfg.fast_sims);
+    fprintf(stderr, "C_PUCT    : %.3f\n", cfg.c_puct);
+    fprintf(stderr, "DirNoise  : alpha=%.4f frac=%.3f\n",
+            cfg.dirichlet_alpha, cfg.dirichlet_frac);
+    if (cfg.resign_threshold >= 0.0f) {
+        fprintf(stderr, "Resign    : root Q < -%.3f after move %d (disabled in %.1f%% games)\n",
+                cfg.resign_threshold, cfg.resign_min_move,
+                100.0f * cfg.resign_disable_prob);
+    } else {
+        fprintf(stderr, "Resign    : off\n");
+    }
     fprintf(stderr, "\n");
 
     std::vector<float> all_states, all_policies, all_values;
@@ -401,7 +511,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Wrote: %s\n", path.c_str());
     }
 
-    /* timing.json — per-phase breakdown (read by the Python runner) */
+    /* timing.json — per-phase breakdown and counters for the Python runner */
     {
         std::string path = cfg.output_dir + "/timing.json";
         if (FILE *fp = fopen(path.c_str(), "w")) {
@@ -409,7 +519,15 @@ int main(int argc, char *argv[])
             fprintf(fp, "    \"mcts_simulation\": %.6f,\n", all_timings.mcts_simulation);
             fprintf(fp, "    \"move_selection\": %.6f,\n",  all_timings.move_selection);
             fprintf(fp, "    \"state_copy\": %.6f,\n",      all_timings.state_copy);
-            fprintf(fp, "    \"winner_check\": %.6f\n",     all_timings.winner_check);
+            fprintf(fp, "    \"winner_check\": %.6f\n",      all_timings.winner_check);
+            fprintf(fp, "  },\n  \"metrics\": {\n");
+            fprintf(fp, "    \"completed_games\": %d,\n",      all_timings.completed_games);
+            fprintf(fp, "    \"total_game_moves\": %lld,\n",    all_timings.total_game_moves);
+            fprintf(fp, "    \"resignations\": %d,\n",       all_timings.resignations);
+            fprintf(fp, "    \"resign_disabled_candidates\": %d,\n",
+                    all_timings.resign_disabled_candidates);
+            fprintf(fp, "    \"resign_false_positives\": %d\n",
+                    all_timings.resign_false_positives);
             fprintf(fp, "  }\n}\n");
             fclose(fp);
             fprintf(stderr, "Wrote: %s\n", path.c_str());

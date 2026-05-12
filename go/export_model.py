@@ -3,10 +3,10 @@
 export_model.py — Convert a state_dict .pt file to TorchScript for C++ inference.
 
 Usage:
-    BOARD_SIZE=9 python export_model.py <state_dict.pt> <output_ts.pt>
+    BOARD_SIZE=19 python export_model.py <state_dict.pt> <output_ts.pt>
 
 Example:
-    BOARD_SIZE=9 python export_model.py models_9x9/157_best_model.pt models_9x9/157_ts.pt
+    BOARD_SIZE=19 python export_model.py models_19x19_az20/0_best_model.pt models_19x19_az20/0_ts.pt
 """
 
 import os
@@ -21,14 +21,14 @@ def strip_orig_mod(state_dict):
 
 def main():
     if len(sys.argv) != 3:
-        print(f"Usage: BOARD_SIZE=9 python {sys.argv[0]} <state_dict.pt> <output_ts.pt>",
+        print(f"Usage: BOARD_SIZE=19 python {sys.argv[0]} <state_dict.pt> <output_ts.pt>",
               file=sys.stderr)
         sys.exit(1)
 
     state_path  = sys.argv[1]
     output_path = sys.argv[2]
 
-    os.environ.setdefault("BOARD_SIZE", "9")
+    os.environ.setdefault("BOARD_SIZE", "19")
 
     from model import NeuralNetwork  # import after setting BOARD_SIZE
 

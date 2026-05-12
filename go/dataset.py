@@ -1,79 +1,74 @@
 import torch
 import numpy as np
 import pickle
+import os
 from copy import copy
 from config import Config as cfg
 import random
-from game import board_to_canonical_3d
+from game import board_to_canonical_17
 from augmentation import augment_data, augment_data_17plane, get_augmentations
 
 class GoDataset:
     def __init__(self, dataset, use_augmentation=False):
+        self.dataset = dataset
         self.use_augmentation = use_augmentation and cfg.USE_AUGMENTATION
         if self.use_augmentation:
             self.augmentations = get_augmentations()
 
-        # Precompute all canonical board representations and targets
-        n = len(dataset)
-        # Store raw data for augmented samples
-        self.states_flat = [d[0] for d in dataset]
-        self.players = [d[2] for d in dataset]
-
-        # Precompute canonical 3D tensors for all samples
-        canonical_list = []
-        values = np.empty(n, dtype=np.float32)
-        policies = np.empty((n, len(dataset[0][1])), dtype=np.float32) if n > 0 else np.empty((0, 0), dtype=np.float32)
-
-        for i, datapoint in enumerate(dataset):
+        # Validate shapes without stacking the whole replay buffer in memory.
+        expected_state_shape = (17, cfg.BOARD_SIZE, cfg.BOARD_SIZE)
+        for datapoint in dataset:
             state = datapoint[0]
-            player = datapoint[2]
-            values[i] = datapoint[3]
-            policies[i] = datapoint[1]
+            policy = datapoint[1]
             if isinstance(state, np.ndarray) and state.ndim == 3:
-                # Pre-computed 17-plane state from C++ selfplay — use directly.
-                canonical_list.append(state.astype(np.float32))
-            else:
-                # Legacy flat board state — convert to 3-plane canonical.
-                canonical_list.append(board_to_canonical_3d(state, player))
-
-        if n > 0:
-            self.canonical = torch.from_numpy(np.stack(canonical_list))
-        else:
-            self.canonical = torch.empty(0)
-        self.values = torch.from_numpy(values)
-        self.policies = torch.from_numpy(policies)
+                if state.shape != expected_state_shape:
+                    raise ValueError(
+                        f"Expected C++ self-play state shape {expected_state_shape}, "
+                        f"got {state.shape}. Check that Config.SAVE_PICKLES "
+                        "matches the current 17-plane model."
+                    )
+            if np.asarray(policy).shape != (cfg.ACTION_SIZE,):
+                raise ValueError(
+                    f"Expected policy shape ({cfg.ACTION_SIZE},), "
+                    f"got {np.asarray(policy).shape}"
+                )
 
     def __len__(self):
-        return self.values.shape[0]
+        return len(self.dataset)
 
     def __getitem__(self, index):
-        state_raw = self.states_flat[index]
+        state_raw, policy_raw, player, value = self.dataset[index]
+        policy = np.asarray(policy_raw, dtype=np.float32)
         is_precomputed_3d = isinstance(state_raw, np.ndarray) and state_raw.ndim == 3
 
-        if self.use_augmentation and random.random() < 0.5:
+        if self.use_augmentation:
             transform_type = random.choice(self.augmentations)
             if is_precomputed_3d:
                 # 17-plane C++ selfplay data — augment all planes in one call.
                 aug_state, aug_p = augment_data_17plane(
-                    state_raw, self.policies[index].numpy(), transform_type
+                    state_raw, policy, transform_type
                 )
                 return (torch.from_numpy(aug_state.astype(np.float32)),
-                        self.values[index],
+                        torch.tensor(value, dtype=torch.float32),
                         torch.from_numpy(aug_p.astype(np.float32)))
             else:
                 # Legacy flat-board Python selfplay data.
                 state_flat, aug_p = augment_data(
-                    state_raw, self.policies[index].numpy(), transform_type
+                    state_raw, policy, transform_type
                 )
-                state_canonical = board_to_canonical_3d(state_flat, self.players[index])
+                state_canonical = board_to_canonical_17(state_flat, player)
                 return (torch.from_numpy(state_canonical),
-                        self.values[index],
+                        torch.tensor(value, dtype=torch.float32),
                         torch.from_numpy(np.array(aug_p, dtype=np.float32)))
 
-        # Non-augmented: return precomputed tensors directly.
-        return (self.canonical[index],
-                self.values[index],
-                self.policies[index])
+        if is_precomputed_3d:
+            state = np.asarray(state_raw, dtype=np.float32)
+        else:
+            state = board_to_canonical_17(state_raw, player)
+
+        return (torch.from_numpy(state),
+                torch.tensor(value, dtype=torch.float32),
+                torch.from_numpy(policy))
 
 class TrainingDataset:
     def __init__(self):
@@ -110,7 +105,7 @@ class TrainingDataset:
           <npy_dir>/values.npy    (N,)                              float32
 
         States are stored as pre-computed (17, B, B) tensors; GoDataset uses
-        them directly without calling board_to_canonical_3d.  Plane 16 encodes
+        them directly without converting flat boards.  Plane 16 encodes
         color-to-play (1.0 = Black, 0.0 = White).
 
         Any additional files (ownership.npy, scores.npy) are silently ignored.
@@ -120,6 +115,24 @@ class TrainingDataset:
         policies = np.load(_os.path.join(npy_dir, 'policies.npy'))  # (N, ACTION_SIZE)
         values   = np.load(_os.path.join(npy_dir, 'values.npy'))    # (N,)
 
+        expected_state_shape = (17, cfg.BOARD_SIZE, cfg.BOARD_SIZE)
+        if states.ndim != 4 or tuple(states.shape[1:]) != expected_state_shape:
+            raise ValueError(
+                f"Expected states.npy shape (N, {expected_state_shape[0]}, "
+                f"{expected_state_shape[1]}, {expected_state_shape[2]}), "
+                f"got {states.shape}"
+            )
+        if policies.ndim != 2 or policies.shape[1] != cfg.ACTION_SIZE:
+            raise ValueError(
+                f"Expected policies.npy shape (N, {cfg.ACTION_SIZE}), "
+                f"got {policies.shape}"
+            )
+        if len(states) != len(policies) or len(states) != len(values):
+            raise ValueError(
+                f"Mismatched npy rows: states={len(states)}, "
+                f"policies={len(policies)}, values={len(values)}"
+            )
+
         N = len(values)
         print(f"Loaded {N} positions from {npy_dir}")
 
@@ -127,8 +140,8 @@ class TrainingDataset:
             # Plane 16 encodes color-to-play: 1.0 = Black (+1), 0.0 = White (-1).
             color = 1 if states[i, 16, 0, 0] > 0.5 else -1
             self.training_dataset.append([
-                states[i],           # (17, 9, 9) pre-computed canonical planes
-                policies[i],         # (82,) MCTS visit probabilities
+                states[i],           # (17, BOARD_SIZE, BOARD_SIZE) pre-computed planes
+                policies[i],         # (ACTION_SIZE,) MCTS visit probabilities
                 color,               # current player (+1 or -1)
                 float(values[i]),    # game outcome from current player's perspective
             ])
@@ -137,13 +150,47 @@ class TrainingDataset:
 
     def save(self, path):
         """Save the training dataset to a pickle file."""
-        with open(path, 'wb') as handle:
-            pickle.dump(self.training_dataset, handle)
+        tmp_path = f"{path}.tmp.{os.getpid()}"
+        try:
+            if path.endswith(".npz"):
+                states = np.stack([row[0] for row in self.training_dataset]).astype(np.float32)
+                policies = np.stack([row[1] for row in self.training_dataset]).astype(np.float32)
+                players = np.asarray([row[2] for row in self.training_dataset], dtype=np.int8)
+                values = np.asarray([row[3] for row in self.training_dataset], dtype=np.float32)
+                np.savez_compressed(
+                    tmp_path,
+                    states=states,
+                    policies=policies,
+                    players=players,
+                    values=values,
+                )
+                if not tmp_path.endswith(".npz") and os.path.exists(f"{tmp_path}.npz"):
+                    os.replace(f"{tmp_path}.npz", tmp_path)
+            else:
+                with open(tmp_path, 'wb') as handle:
+                    pickle.dump(self.training_dataset, handle)
+            os.replace(tmp_path, path)
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            if os.path.exists(f"{tmp_path}.npz"):
+                os.remove(f"{tmp_path}.npz")
 
     def load(self, path):
         """Load the training dataset from a pickle file."""
-        with open(path, 'rb') as handle:
-            self.training_dataset = pickle.load(handle)
+        if path.endswith(".npz"):
+            with np.load(path) as data:
+                states = data["states"]
+                policies = data["policies"]
+                players = data["players"]
+                values = data["values"]
+                self.training_dataset = [
+                    [states[i], policies[i], int(players[i]), float(values[i])]
+                    for i in range(len(values))
+                ]
+        else:
+            with open(path, 'rb') as handle:
+                self.training_dataset = pickle.load(handle)
 
     def retreive_test_train_data(self):
         data = self.training_dataset

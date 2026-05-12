@@ -168,8 +168,9 @@ def augment_data_17plane(state_17, policy, transform_type):
 
 
 def get_augmentations():
-    """Get list of all possible augmentation types."""
+    """Get list of all possible augmentation types (all 8 dihedral symmetries)."""
     return [
+        'identity',
         'rotate_90',
         'rotate_180',
         'rotate_270',

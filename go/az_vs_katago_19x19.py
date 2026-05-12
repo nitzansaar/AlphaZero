@@ -43,7 +43,7 @@ SCRIPT_DIR            = os.path.dirname(os.path.abspath(__file__))
 KATAGO_BIN            = os.path.join(SCRIPT_DIR, 'KataGo', 'cpp', 'katago')
 GTP_CONFIG            = os.path.join(SCRIPT_DIR, 'KataGo', 'cpp', 'configs', 'gtp_example.cfg')
 GTP_ENGINE            = os.path.join(SCRIPT_DIR, 'gtp_engine_19')
-MODELS_DIR            = os.path.join(SCRIPT_DIR, 'models_19x19_base-nocheat')
+MODELS_DIR            = os.path.join(SCRIPT_DIR, 'models_19x19_base-pass')
 KATAGO_PRETRAINED_DIR = os.path.join(SCRIPT_DIR, 'pretrained_katago_models')
 
 
@@ -270,17 +270,19 @@ def make_katago_engine(model_path: str, visits: int) -> GTPEngine:
 # ---------------------------------------------------------------------------
 
 def play_game(az: GTPEngine, kg: GTPEngine, az_color: int,
-              verbose: bool = False) -> Tuple[list, GoState, int, bool]:
+              verbose: bool = False) -> Tuple[list, GoState, int, bool, Optional[int], Optional[str]]:
     """
     Play one full game between the (already-reset) AZ and KG engines.
 
     az_color: +1 = AlphaZero is Black, -1 = AlphaZero is White.
-    Returns (frames, final_state, final_player, resigned).
+    Returns (frames, final_state, final_player, resigned, forfeit_by, forfeit_reason).
     """
     state    = GoState.initial()
     player   = 1          # absolute: 1=Black, -1=White
     frames   = []
     resigned = False
+    forfeit_by = None
+    forfeit_reason = None
 
     for _ in range(MAX_MOVES):
         if go_game_ended(state):
@@ -288,20 +290,37 @@ def play_game(az: GTPEngine, kg: GTPEngine, az_color: int,
 
         color_str  = 'b' if player == 1 else 'w'
         is_az_turn = (player == az_color)
+        relay_error = None
 
         t0 = time.time()
         if is_az_turn:
             gtp_vertex = az.genmove(color_str)
             if gtp_vertex != 'RESIGN':
-                kg.play(color_str, gtp_vertex)
+                try:
+                    kg.play(color_str, gtp_vertex)
+                except RuntimeError as exc:
+                    relay_error = exc
         else:
             gtp_vertex = kg.genmove(color_str)
             if gtp_vertex != 'RESIGN':
-                az.play(color_str, gtp_vertex)
+                try:
+                    az.play(color_str, gtp_vertex)
+                except RuntimeError as exc:
+                    relay_error = exc
         elapsed = time.time() - t0
 
-        action = gtp_to_az(gtp_vertex)
         engine_label = 'AZ' if is_az_turn else 'KG'
+        if relay_error is not None:
+            forfeit_by = player
+            forfeit_reason = (
+                f'{engine_label} produced illegal move '
+                f'{"Black" if player == 1 else "White"} {gtp_vertex}: {relay_error}'
+            )
+            if verbose:
+                print(f'  {forfeit_reason}')
+            break
+
+        action = gtp_to_az(gtp_vertex)
 
         if action is None:  # resign
             if verbose:
@@ -326,7 +345,7 @@ def play_game(az: GTPEngine, kg: GTPEngine, az_color: int,
         state  = go_next_state_canonical(state, action)
         player = -player
 
-    return frames, state, player, resigned
+    return frames, state, player, resigned, forfeit_by, forfeit_reason
 
 
 # ---------------------------------------------------------------------------
@@ -368,6 +387,7 @@ def resolve_katago_model(elo: int) -> str:
 CSV_COLUMNS = [
     'game_idx', 'az_color', 'result', 'winner',
     'num_moves', 'az_won', 'az_total_s', 'kg_total_s',
+    'forfeit_by', 'forfeit_reason',
 ]
 
 
@@ -396,13 +416,13 @@ def main():
     parser.add_argument('--az-model', default=None,
                         help='Path to AlphaZero torchscript model '
                              '(default: latest *_ts.pt in models_19x19_base/)')
-    parser.add_argument('--az-sims', type=int, default=100,
+    parser.add_argument('--az-sims', type=int, default=160,
                         help='AlphaZero MCTS simulations per move (default: 100)')
     parser.add_argument('--az-batch', type=int, default=32,
                         help='AlphaZero batch size (default: 32)')
     parser.add_argument('--katago-elo', type=int, default=19,
                         help='KataGo ELO tier in pretrained_katago_models/ (default: 19)')
-    parser.add_argument('--katago-visits', type=int, default=100,
+    parser.add_argument('--katago-visits', type=int, default=60,
                         help='KataGo search visits per move (default: 100)')
     parser.add_argument('--az-first-color', choices=['black', 'white', 'alternate'],
                         default='alternate',
@@ -426,7 +446,7 @@ def main():
     print(f'KataGo    model : {katago_model_path}')
     print(f'  visits={args.katago_visits}')
     print(f'Games           : {args.games}   (az_first_color={args.az_first_color})')
-    print()
+    print(flush=True)
 
     print('Starting AlphaZero engine...', end=' ', flush=True)
     az = make_az_engine(az_model_path, args.az_sims, args.az_batch)
@@ -458,12 +478,15 @@ def main():
                       f'AZ={az_color_name} KG={kg_color_name} ===')
 
             t_game = time.time()
-            frames, final_state, final_player, resigned = play_game(
+            frames, final_state, final_player, resigned, forfeit_by, forfeit_reason = play_game(
                 az, kg, az_color, verbose=args.verbose,
             )
             game_elapsed = time.time() - t_game
 
-            if resigned:
+            if forfeit_by is not None:
+                winner_abs = -forfeit_by
+                result_str = f'{"B" if winner_abs == 1 else "W"}+F'
+            elif resigned:
                 winner_abs = -final_player  # whoever's turn it was when opponent resigned
                 result_str = f'{"B" if winner_abs == 1 else "W"}+R'
             else:
@@ -500,13 +523,17 @@ def main():
                 'az_won':     int(az_won),
                 'az_total_s': round(az_total_s, 3),
                 'kg_total_s': round(kg_total_s, 3),
+                'forfeit_by': 'AZ' if forfeit_by == az_color else ('KG' if forfeit_by == -az_color else ''),
+                'forfeit_reason': forfeit_reason or '',
             })
 
             tag = 'AZ' if az_won else ('KG' if winner_abs != 0 else 'Draw')
             print(f'Game {game_idx+1:3d}/{args.games}  AZ={az_color_name}  '
                   f'-> {result_str:>8s}  ({tag:<4s} wins, '
-                  f'{len(frames):3d} moves, {game_elapsed:5.1f}s)')
+                  f'{len(frames):3d} moves, {game_elapsed:5.1f}s)', flush=True)
             if args.verbose:
+                if forfeit_reason:
+                    print(f'  Forfeit: {forfeit_reason}')
                 print(f'  AZ time: {az_total_s:.1f}s  KG time: {kg_total_s:.1f}s')
                 print('=' * 60)
     finally:

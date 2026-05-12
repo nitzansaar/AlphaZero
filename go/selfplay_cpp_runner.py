@@ -23,10 +23,10 @@ import threading
 import subprocess
 import tempfile
 import torch
-from glob import glob
 from tqdm import tqdm
 from config import Config as cfg
 from dataset import TrainingDataset
+from checkpoint_metadata import latest_checkpoint_path, MODEL_FILENAME
 
 # ── Constants ────────────────────────────────────────────────────────────
 
@@ -47,29 +47,53 @@ NUM_WORKERS = min(os.cpu_count() or 1, _worker_cap) if _worker_cap else (os.cpu_
 # if CUDA is unavailable on the target machine.
 USE_CUDA = torch.cuda.is_available()
 
+_RESIGN_METRIC_KEYS = {
+    "resignations",
+    "resign_disabled_candidates",
+    "resign_false_positives",
+}
+
 # ── Helper functions ──────────────────────────────────────────────────────
 
 def get_latest_model_path():
     """Return the path of the highest-numbered model checkpoint, or None."""
-    all_models = glob(os.path.join(cfg.SAVE_MODEL_PATH, "*.pt"))
-    all_models = [m for m in all_models if not m.endswith("_ts.pt")]
-    if not all_models:
+    latest_num, path = latest_checkpoint_path(cfg.SAVE_MODEL_PATH)
+    if path is None:
         return None
-
-    def _parse_iter(path):
-        stem = os.path.basename(path).split("_")[0]
-        try:
-            return int(stem)
-        except ValueError:
-            return None
-
-    files = [n for n in (_parse_iter(f) for f in all_models) if n is not None]
-    if not files:
-        return None
-    latest_num = max(files)
-    path = os.path.join(cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(latest_num))
     print(f"[Selfplay] Using latest model: iter_{latest_num} ({path})")
     return path
+
+
+def _source_mtime(paths):
+    latest = 0.0
+    for path in paths:
+        try:
+            latest = max(latest, os.path.getmtime(path))
+        except OSError:
+            pass
+    return latest
+
+
+def verify_binary_fresh():
+    """Fail early if the self-play binary predates sources it depends on."""
+    binary_mtime = os.path.getmtime(SELFPLAY_BINARY)
+    sources = [
+        os.path.join(_HERE, "selfplay_cpp.cpp"),
+        os.path.join(_HERE, "mcts.cpp"),
+        os.path.join(_HERE, "mcts.h"),
+        os.path.join(_HERE, "go_engine.c"),
+        os.path.join(_HERE, "go_engine.h"),
+        os.path.join(_HERE, "nn_inference.cpp"),
+        os.path.join(_HERE, "nn_inference.h"),
+        os.path.join(_HERE, "npy_writer.c"),
+        os.path.join(_HERE, "npy_writer.h"),
+    ]
+    newest_source = _source_mtime(sources)
+    if newest_source > binary_mtime:
+        target = "selfplay_cpp" if cfg.BOARD_SIZE == 9 else f"selfplay_cpp_{cfg.BOARD_SIZE}"
+        print(f"ERROR: {SELFPLAY_BINARY} is older than its source files.")
+        print(f"Rebuild it with:  make {target}")
+        sys.exit(1)
 
 
 def _monitor_progress(worker_dirs, games_per_worker_list, stop_event, bars):
@@ -94,7 +118,13 @@ def _monitor_progress(worker_dirs, games_per_worker_list, stop_event, bars):
 
 def export_torchscript(state_dict_path):
     """Run export_model.py to convert state_dict → TorchScript; return ts path."""
-    ts_path = state_dict_path.replace("_best_model.pt", "_ts.pt")
+    if os.path.basename(state_dict_path) == MODEL_FILENAME:
+        ts_path = os.path.join(os.path.dirname(state_dict_path), "model_ts.pt")
+    elif state_dict_path.endswith("_best_model.pt"):
+        ts_path = state_dict_path.replace("_best_model.pt", "_ts.pt")
+    else:
+        root, _ = os.path.splitext(state_dict_path)
+        ts_path = f"{root}_ts.pt"
     env = os.environ.copy()
     env["BOARD_SIZE"] = str(cfg.BOARD_SIZE)
     subprocess.run(
@@ -104,6 +134,127 @@ def export_torchscript(state_dict_path):
         check=True,
     )
     return ts_path
+
+
+def _clamp(value, low, high):
+    return max(low, min(high, value))
+
+
+def _resign_state_path():
+    return os.path.join(cfg.LOGDIR, cfg.RESIGN_STATE_FILE)
+
+
+def _resign_bounds():
+    low = float(cfg.RESIGN_THRESHOLD_MIN)
+    high = float(cfg.RESIGN_THRESHOLD_MAX)
+    if low > high:
+        low, high = high, low
+    return low, high
+
+
+def _resign_auto_enabled():
+    return bool(cfg.RESIGN_AUTO_ADJUST) and float(cfg.RESIGN_THRESHOLD) >= 0.0
+
+
+def load_resign_threshold():
+    """Load the persisted auto-adjusted threshold, or fall back to config."""
+    threshold = float(cfg.RESIGN_THRESHOLD)
+    if threshold < 0.0:
+        return threshold, {}
+
+    low, high = _resign_bounds()
+    threshold = _clamp(threshold, low, high)
+    if not _resign_auto_enabled():
+        return threshold, {}
+
+    path = _resign_state_path()
+    try:
+        with open(path) as f:
+            state = json.load(f)
+    except (FileNotFoundError, ValueError, OSError):
+        return threshold, {}
+
+    try:
+        threshold = _clamp(float(state["threshold"]), low, high)
+    except (KeyError, TypeError, ValueError):
+        pass
+    return threshold, state if isinstance(state, dict) else {}
+
+
+def _write_json_atomic(path, data):
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(data, f, indent=2, sort_keys=True)
+    os.replace(tmp_path, path)
+
+
+def update_resign_threshold(current_threshold, metrics, state):
+    """Adjust the threshold to keep no-resign false positives below target."""
+    candidates = int(metrics.get("resign_disabled_candidates", 0) or 0)
+    false_positives = int(metrics.get("resign_false_positives", 0) or 0)
+    resignations = int(metrics.get("resignations", 0) or 0)
+
+    false_positive_rate = (
+        false_positives / candidates if candidates > 0 else None
+    )
+    update = {
+        "auto_adjust": bool(_resign_auto_enabled()),
+        "threshold_used": round(current_threshold, 6),
+        "threshold_next": round(current_threshold, 6),
+        "target_false_positive_rate": float(cfg.RESIGN_TARGET_FALSE_POSITIVE_RATE),
+        "disabled_candidates": candidates,
+        "false_positives": false_positives,
+        "resignations": resignations,
+        "false_positive_rate": false_positive_rate,
+        "action": "off",
+    }
+
+    if current_threshold < 0.0:
+        return current_threshold, update
+    if not _resign_auto_enabled():
+        update["action"] = "fixed"
+        return current_threshold, update
+
+    low, high = _resign_bounds()
+    target = float(cfg.RESIGN_TARGET_FALSE_POSITIVE_RATE)
+    step = float(cfg.RESIGN_ADJUST_STEP)
+    min_samples = int(cfg.RESIGN_MIN_ADJUST_SAMPLES)
+    next_threshold = current_threshold
+
+    if candidates < min_samples:
+        update["action"] = "insufficient_samples"
+    elif false_positive_rate > target:
+        next_threshold = _clamp(current_threshold + step, low, high)
+        update["action"] = "more_conservative" if next_threshold != current_threshold else "at_max"
+    elif false_positive_rate < target * 0.5:
+        next_threshold = _clamp(current_threshold - step, low, high)
+        update["action"] = "more_aggressive" if next_threshold != current_threshold else "at_min"
+    else:
+        update["action"] = "keep"
+
+    update["threshold_next"] = round(next_threshold, 6)
+
+    history = state.get("history", []) if isinstance(state, dict) else []
+    if not isinstance(history, list):
+        history = []
+    history.append({
+        "timestamp": time.time(),
+        "threshold_used": round(current_threshold, 6),
+        "threshold_next": round(next_threshold, 6),
+        "disabled_candidates": candidates,
+        "false_positives": false_positives,
+        "false_positive_rate": false_positive_rate,
+        "resignations": resignations,
+        "action": update["action"],
+    })
+
+    max_history = int(getattr(cfg, "RESIGN_HISTORY_SIZE", 100))
+    _write_json_atomic(_resign_state_path(), {
+        "threshold": next_threshold,
+        "last_update": update,
+        "history": history[-max_history:],
+    })
+    return next_threshold, update
 
 
 # ── Main ──────────────────────────────────────────────────────────────────
@@ -124,10 +275,17 @@ if __name__ == "__main__":
         else:
             print(f"Compile it with:  make selfplay_cpp_{cfg.BOARD_SIZE}")
         sys.exit(1)
+    verify_binary_fresh()
 
     os.makedirs(cfg.SAVE_PICKLES, exist_ok=True)
     os.makedirs(cfg.LOGDIR, exist_ok=True)
     save_path = os.path.join(cfg.SAVE_PICKLES, cfg.DATASET_PATH)
+    load_path = save_path
+    if not os.path.exists(load_path) and save_path.endswith(".npz"):
+        legacy_path = save_path[:-4] + ".pkl"
+        if os.path.exists(legacy_path):
+            load_path = legacy_path
+    resign_threshold, resign_state = load_resign_threshold()
 
     # ── 1. Export TorchScript model ──────────────────────────────────────
     model_path = get_latest_model_path()
@@ -137,6 +295,8 @@ if __name__ == "__main__":
         sys.exit(1)
 
     print(f"State-dict model : {model_path}")
+    model_iter, _ = latest_checkpoint_path(cfg.SAVE_MODEL_PATH)
+    seed_base = int(time.time()) ^ (os.getpid() << 16) ^ (int(model_iter or 0) * 1000003)
     export_start = time.time()
     ts_path = export_torchscript(model_path)
     export_time = time.time() - export_start
@@ -150,7 +310,15 @@ if __name__ == "__main__":
 
     print(f"\nRunning {cfg.SELFPLAY_GAMES} games across {effective_workers} workers "
           f"({'GPU' if USE_CUDA else 'CPU'}):")
+    if resign_threshold >= 0.0:
+        mode = "auto" if _resign_auto_enabled() else "fixed"
+        print(f"  resignation threshold: {resign_threshold:.3f} ({mode}; "
+              f"min move {cfg.RESIGN_MIN_MOVE}, no-resign {cfg.RESIGN_DISABLE_PROB:.0%})")
+    else:
+        print("  resignation: off")
 
+    agg_timings = {}
+    agg_metrics = {}
     with tempfile.TemporaryDirectory(prefix="selfplay_cpp_") as tmp_dir:
         # Launch all workers in parallel.
         # Redirect each worker's stdout/stderr to a per-worker log file so
@@ -173,10 +341,15 @@ if __name__ == "__main__":
                 "--output",         worker_dir,
                 "--temp-moves",     str(cfg.TEMP_THRESHOLD),
                 "--max-moves",      str(getattr(cfg, 'MAX_MOVES', 200)),
-                "--seed",           str(i * 1000),
+                "--seed",           str(seed_base + i * 1000),
                 "--full-prob",      str(cfg.PLAYOUT_CAP_PROB),
                 "--fast-sims",      str(cfg.FAST_SIMS),
-                "--min-pass-move",  str(getattr(cfg, 'MIN_PASS_MOVE', 0)),
+                "--resign-threshold", str(resign_threshold),
+                "--resign-min-move", str(cfg.RESIGN_MIN_MOVE),
+                "--resign-disable-prob", str(cfg.RESIGN_DISABLE_PROB),
+                "--c-puct",         str(cfg.MCTS_UCB_C),
+                "--dirichlet-alpha", str(cfg.MCTS_DIRICHLET_ALPHA),
+                "--dirichlet-frac", str(cfg.MCTS_DIRICHLET_FRACTION),
             ]
             if USE_CUDA:
                 cmd.append("--cuda")
@@ -245,8 +418,8 @@ if __name__ == "__main__":
 
         # ── 3. Merge into the existing pickle dataset ─────────────────────
         training_dataset = TrainingDataset()
-        if os.path.exists(save_path):
-            training_dataset.load(save_path)
+        if os.path.exists(load_path):
+            training_dataset.load(load_path)
             print(f"Existing dataset : {len(training_dataset.training_dataset)} samples")
         else:
             print("Starting with empty dataset")
@@ -254,32 +427,53 @@ if __name__ == "__main__":
         for worker_dir in worker_dirs:
             training_dataset.load_from_npy(worker_dir)
 
+        # Read per-worker timing and resignation metrics before
+        # TemporaryDirectory removes them.
+        for wdir in worker_dirs:
+            timing_path = os.path.join(wdir, "timing.json")
+            try:
+                with open(timing_path) as f:
+                    worker_data = json.load(f)
+                for k, v in worker_data.get("timings", {}).items():
+                    target = agg_metrics if k in _RESIGN_METRIC_KEYS else agg_timings
+                    target[k] = target.get(k, 0.0) + v
+                for k, v in worker_data.get("metrics", {}).items():
+                    agg_metrics[k] = agg_metrics.get(k, 0.0) + v
+            except (FileNotFoundError, KeyError, ValueError):
+                pass
+
+    resign_threshold_next, resign_update = update_resign_threshold(
+        resign_threshold, agg_metrics, resign_state
+    )
+
     training_dataset.save(save_path)
     total_time = time.time() - total_start
 
     print(f"\nTotal training samples: {len(training_dataset.training_dataset)}")
     print(f"Self-play time   : {selfplay_time:.1f}s")
     print(f"Total time       : {total_time:.1f}s")
+    if resign_threshold >= 0.0:
+        fp_rate = resign_update["false_positive_rate"]
+        fp_text = "n/a" if fp_rate is None else f"{fp_rate:.2%}"
+        print(f"Resign threshold : {resign_threshold:.3f} → {resign_threshold_next:.3f} "
+              f"({resign_update['action']}, false positives {fp_text})")
 
     # ── 4. Save timing data (same format as selfplay.py) ─────────────────
     # Aggregate per-phase timings written by each C++ worker.
-    agg_timings = {}
-    for wdir in worker_dirs:
-        timing_path = os.path.join(wdir, "timing.json")
-        try:
-            with open(timing_path) as f:
-                worker_t = json.load(f)["timings"]
-            for k, v in worker_t.items():
-                agg_timings[k] = agg_timings.get(k, 0.0) + v
-        except (FileNotFoundError, KeyError, ValueError):
-            pass
     # Round for readability
     agg_timings = {k: round(v, 4) for k, v in agg_timings.items()}
+    completed_games = int(agg_metrics.get("completed_games", 0) or 0)
+    total_game_moves = agg_metrics.get("total_game_moves", 0) or 0
+    if completed_games > 0:
+        agg_metrics["avg_selfplay_game_moves"] = total_game_moves / completed_games
+    agg_metrics = {k: round(v, 4) for k, v in agg_metrics.items()}
 
     timing_data = {
         "timings": agg_timings if agg_timings else {
             "selfplay_cpp": round(selfplay_time, 3),
-        }
+        },
+        "metrics": agg_metrics,
+        "resignation": resign_update,
     }
     timing_path = os.path.join(cfg.LOGDIR, "selfplay_timing.json")
     with open(timing_path, "w") as f:

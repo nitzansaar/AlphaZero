@@ -19,9 +19,15 @@ MCTS_CPP = mcts.cpp
 NN_CPP   = nn_inference.cpp
 NPY_C    = npy_writer.c
 
-# 19x19 compile-time overrides
-DEFINES_19 = -DBOARD_SIZE=19 -DNUM_POSITIONS=361 -DPASS_ACTION=361 \
-             -DACTION_SIZE=362 "-DKOMI=7.5f" -DNODE_POOL_SIZE=200000
+# 19x19 compile-time overrides.
+#
+# Self-play runs many workers, so keep its per-process MCTS pool compact.
+# The GTP evaluator runs one AlphaZero engine and needs a larger pool for
+# full-strength 1600-simulation searches on an empty 19x19 board.
+DEFINES_19_COMMON = -DBOARD_SIZE=19 -DNUM_POSITIONS=361 -DPASS_ACTION=361 \
+                    -DACTION_SIZE=362 "-DKOMI=7.5f"
+DEFINES_19 = $(DEFINES_19_COMMON) -DNODE_POOL_SIZE=200000
+DEFINES_19_GTP = $(DEFINES_19_COMMON) -DNODE_POOL_SIZE=800000
 
 BINARIES    = test_go_engine test_mcts test_nn selfplay_cpp gatekeeper gtp_engine
 BINARIES_19 = selfplay_cpp_19 gatekeeper_19 gtp_engine_19 \
@@ -66,7 +72,7 @@ gatekeeper_19: $(ENGINE_C) $(MCTS_CPP) $(NN_CPP) gatekeeper.cpp
 	$(CXX) $(CXXFLAGS) $(DEFINES_19) $(LDFLAGS) -o $@ $^
 
 gtp_engine_19: $(ENGINE_C) $(MCTS_CPP) $(NN_CPP) gtp_engine.cpp
-	$(CXX) $(CXXFLAGS) $(DEFINES_19) $(LDFLAGS) -o $@ $^
+	$(CXX) $(CXXFLAGS) $(DEFINES_19_GTP) $(LDFLAGS) -o $@ $^
 
 test_go_engine_19: $(ENGINE_C) tests/test_go_engine.c
 	$(CC) $(CFLAGS) $(DEFINES_19) -o $@ $^
