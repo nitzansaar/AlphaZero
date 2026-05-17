@@ -2,7 +2,7 @@
 
 AlphaZero-style reinforcement learning for board games. Learns through MCTS-guided self-play with a dual-head neural network (policy + value).
 
-[Research paper](nitzan_saar_research.pdf)
+> **[Research Paper](nitzan_saar_research.pdf)**
 
 Supports:
 - Connect Five (9x9 board)
