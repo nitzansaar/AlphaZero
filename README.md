@@ -1,8 +1,6 @@
-# AlphaZero Agent
+# AlphaZero Agent — [Research Paper](nitzan_saar_research.pdf)
 
 AlphaZero-style reinforcement learning for board games. Learns through MCTS-guided self-play with a dual-head neural network (policy + value).
-
-> **[Research Paper](nitzan_saar_research.pdf)**
 
 Supports:
 - Connect Five (9x9 board)
