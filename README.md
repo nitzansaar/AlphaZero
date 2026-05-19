@@ -6,6 +6,22 @@ Supports:
 - Connect Five (9x9 board)
 - Go (9x9, and 19x19)
 
+## Connect Five (TicTacToe)
+
+```bash
+cd tictactoe
+
+# Training
+./train.sh
+
+# Play against bot
+python play_human_vs_bot_flask.py
+
+# Testing
+python test_vs_random.py
+python test_bot_vs_bot.py
+```
+
 ## Go
 
 ```bash
@@ -35,22 +51,5 @@ BOARD_SIZE=19 python analyze_board.py --model models_19x19/10_best_model.pt --si
 
 # Interactive 19x19 match runner and move-by-move replay visualizer.
 go/notebooks/az20_vs_pretrained_katago_19x19.ipynb
-```
-
-
-## Connect Five (TicTacToe)
-
-```bash
-cd tictactoe
-
-# Training
-./train.sh
-
-# Play against bot
-python play_human_vs_bot_flask.py
-
-# Testing
-python test_vs_random.py
-python test_bot_vs_bot.py
 ```
 
