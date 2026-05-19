@@ -1,9 +1,8 @@
-<video src="tictactoe/Screen%20Recording%202026-05-19%20at%204.07.50%E2%80%AFPM.mov" controls width="100%"></video>
-
 # AlphaZero Agent
 
 AlphaZero-style reinforcement learning for board games. Learns through MCTS-guided self-play with a dual-head neural network (policy + value).
 
+- [![TicTacToe demo](tictactoe/tictactoe-demo.gif)](tictactoe/tictactoe-demo.mp4)
 - [Research Paper](nitzan_saar_research.pdf)
 
 Supports:
