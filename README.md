@@ -25,9 +25,21 @@ python test_vs_random.py
 python test_bot_vs_bot.py
 ```
 
-### Docker Demo
+### Play TicTacToe Against the Bot with Docker
 
-From the repository root:
+You can play TicTacToe against the trained bot from a public Docker image,
+without cloning this repository:
+
+```bash
+docker run --rm -p 5001:5001 nitzansaar/alphazero-tictactoe:latest
+```
+
+Open http://localhost:5001 in your browser.
+
+This requires Docker Desktop or Docker Engine to be installed and running. The
+first run may take a few minutes while Docker downloads the image.
+
+To build the image locally instead, run this from the repository root:
 
 ```bash
 docker build -t alphazero-tictactoe .
