@@ -25,6 +25,15 @@ python test_vs_random.py
 python test_bot_vs_bot.py
 ```
 
+### Docker Demo
+
+From the repository root:
+
+```bash
+docker build -t alphazero-tictactoe .
+docker run --rm -p 5001:5001 alphazero-tictactoe
+```
+
 ## Go
 
 ```bash

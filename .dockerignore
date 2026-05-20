@@ -1,0 +1,21 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.DS_Store
+
+# Large research artifacts that are not needed for the TicTacToe Flask demo.
+go/
+tictactoe/test_output/
+tictactoe/output_tictac/logs/
+tictactoe/output_tictac/pickles/
+tictactoe/*.mp4
+tictactoe/*.mov
+tictactoe/*.gif
+
+# Keep trained TicTacToe model checkpoints available to the demo.
+!tictactoe/output_tictac/models/
+!tictactoe/output_tictac/models/*.pt
