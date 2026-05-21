@@ -122,6 +122,26 @@
             border-radius: 10px;
             width: 400px;
             box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            position: relative;
+        }
+        .modal-close {
+            position: absolute;
+            top: 8px;
+            right: 12px;
+            background: transparent;
+            color: white;
+            border: none;
+            font-size: 22px;
+            font-weight: bold;
+            cursor: pointer;
+            padding: 0;
+            margin: 0;
+            line-height: 1;
+            opacity: 0.85;
+            z-index: 1;
+        }
+        .modal-close:hover {
+            opacity: 1;
         }
         .modal-header {
             padding: 30px;
@@ -183,17 +203,20 @@
     </div>
 
     <div id="controls">
+        <button id="showOptionsBtn" class="new-game-btn" onclick="showGameOverOptions()" style="display: none;">Show Options</button>
         <button class="new-game-btn" onclick="goToSettings()">Main Menu</button>
     </div>
 
     <!-- Game Over Modal -->
     <div id="gameOverModal" class="modal">
         <div class="modal-content">
+            <button class="modal-close" onclick="closeGameOverModal()" title="Review board">&times;</button>
             <div id="modalHeader" class="modal-header">Game Over</div>
             <div class="modal-body">
                 <button class="modal-button play-again-btn" onclick="playAgain()">Play Again</button>
                 <button class="modal-button switch-sides-btn" onclick="switchSides()">Switch Sides</button>
                 <button class="modal-button main-menu-btn" onclick="mainMenu()">Main Menu</button>
+                <button class="modal-button" onclick="closeGameOverModal()" style="background-color: #E0E0E0; color: #333;">Review Board</button>
             </div>
         </div>
     </div>
@@ -592,6 +615,17 @@
             }
 
             modal.style.display = 'block';
+            document.getElementById('showOptionsBtn').style.display = 'none';
+        }
+
+        function closeGameOverModal() {
+            document.getElementById('gameOverModal').style.display = 'none';
+            document.getElementById('showOptionsBtn').style.display = 'inline-block';
+        }
+
+        function showGameOverOptions() {
+            document.getElementById('gameOverModal').style.display = 'block';
+            document.getElementById('showOptionsBtn').style.display = 'none';
         }
 
         function playAgain() {
