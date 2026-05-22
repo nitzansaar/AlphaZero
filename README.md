@@ -3,6 +3,8 @@
 AlphaZero-style reinforcement learning for board games. Learns through MCTS-guided self-play with a dual-head neural network (policy + value).
 
 - [![TicTacToe demo](tictactoe/tictactoe-demo.gif)](tictactoe/tictactoe-demo.mp4)
+- Play against the trained bot in your browser without downloading any code:
+  https://alphazero-tictactoe-656162484525.us-west2.run.app/
 - [Research Paper](nitzan_saar_research.pdf)
 
 Supports:
@@ -27,24 +29,14 @@ python test_bot_vs_bot.py
 
 ### Play TicTacToe Against the Bot with Docker
 
-You can play TicTacToe against the trained bot from a public Docker image,
-without cloning this repository:
-
-```bash
-docker run --rm -p 5001:5001 nitzansaar/alphazero-tictactoe:latest
-```
-
-Open http://localhost:5001 in your browser.
-
-This requires Docker Desktop or Docker Engine to be installed and running. The
-first run may take a few minutes while Docker downloads the image.
-
-To build the image locally instead, run this from the repository root:
+To build the image locally, run this from the repository root:
 
 ```bash
 docker build -t alphazero-tictactoe .
 docker run --rm -p 5001:5001 alphazero-tictactoe
 ```
+
+Open http://localhost:5001 in your browser.
 
 ## Go
 
