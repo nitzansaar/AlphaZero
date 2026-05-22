@@ -9,13 +9,18 @@
             font-family: Arial, sans-serif;
             background-color: #F0F0F0;
             margin: 0;
-            padding: 20px;
+            padding: 12px;
             display: flex;
             flex-direction: column;
             align-items: center;
+            box-sizing: border-box;
+            min-height: 100vh;
+        }
+        * {
+            box-sizing: inherit;
         }
         #status {
-            width: 720px;
+            width: min(720px, 100%);
             background-color: #90EE90;
             color: black;
             text-align: center;
@@ -29,15 +34,21 @@
             background-color: #FFFF99;
         }
         #canvas-container {
+            width: min(720px, 100%);
             margin: 10px 0;
         }
         #gameCanvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            aspect-ratio: 1 / 1;
             background: white;
             border: 2px solid #333;
             cursor: pointer;
+            touch-action: manipulation;
         }
         #heatmap-container {
-            width: 720px;
+            width: min(720px, 100%);
             margin: 10px 0;
         }
         #heatmap-container label {
@@ -45,7 +56,7 @@
             font-size: 12px;
         }
         #visit-counts-container {
-            width: 720px;
+            width: min(720px, 100%);
             margin: 10px 0;
             background: white;
             border: 1px solid #ddd;
@@ -120,7 +131,7 @@
             margin: 10% auto;
             padding: 0;
             border-radius: 10px;
-            width: 400px;
+            width: min(400px, calc(100vw - 24px));
             box-shadow: 0 4px 20px rgba(0,0,0,0.3);
             position: relative;
         }
@@ -180,6 +191,24 @@
         .main-menu-btn {
             background-color: #9E9E9E;
             color: white;
+        }
+        @media (max-width: 480px) {
+            body {
+                padding: 8px;
+            }
+            #status {
+                font-size: 16px;
+                padding: 12px;
+            }
+            #controls {
+                display: flex;
+                gap: 8px;
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+            button {
+                margin: 0;
+            }
         }
     </style>
 </head>
@@ -475,8 +504,8 @@
             }
 
             const rect = canvas.getBoundingClientRect();
-            const x = event.clientX - rect.left;
-            const y = event.clientY - rect.top;
+            const x = (event.clientX - rect.left) * (canvas.width / rect.width);
+            const y = (event.clientY - rect.top) * (canvas.height / rect.height);
 
             const col = Math.floor(x / CELL_SIZE);
             const row = Math.floor(y / CELL_SIZE);
@@ -497,8 +526,8 @@
 
         function handleMouseMove(event) {
             const rect = canvas.getBoundingClientRect();
-            const x = event.clientX - rect.left;
-            const y = event.clientY - rect.top;
+            const x = (event.clientX - rect.left) * (canvas.width / rect.width);
+            const y = (event.clientY - rect.top) * (canvas.height / rect.height);
 
             const col = Math.floor(x / CELL_SIZE);
             const row = Math.floor(y / CELL_SIZE);
