@@ -32,7 +32,7 @@ extern "C" {
 #  define ACTION_SIZE   (NUM_POSITIONS + 1)
 #endif
 #ifndef KOMI
-#  define KOMI          6.0f
+#  define KOMI          6.5f
 #endif
 
 /* ── Game state ───────────────────────────────────────────────────────── */

@@ -21,76 +21,6 @@ import os
 # or debugging runs.
 DEFAULT_BOARD_SIZE = int(os.environ.get('BOARD_SIZE', '19'))
 
-
-class Config5x5:
-    """Configuration for 5x5 Go (proof of concept)"""
-
-    # Board settings
-    BOARD_SIZE = 5
-    NUM_POSITIONS = 25
-    PASS_ACTION = 25
-    ACTION_SIZE = 26  # 25 positions + 1 pass
-
-    # Komi (compensation for white)
-    KOMI = 2.5
-
-    # Training settings
-    BATCH_SIZE = 512
-    TRAIN_STEPS = 15
-    SELFPLAY_GAMES = 500
-    LEARNING_RATE = 0.0002
-    WEIGHT_DECAY = 1e-4
-    MOMENTUM = 0.9
-    LR_DECAY_ITERS = [100, 150]
-    LR_DECAY_FACTOR = 0.1
-
-    # MCTS settings
-    NUM_SIMULATIONS = 1600
-    MCTS_UCB_C = 1.414  # sqrt(2)
-
-    # Playout cap randomization
-    PLAYOUT_CAP_PROB = 0.25
-    FAST_SIMS        = 100
-
-    # Network architecture
-    NUM_RES_BLOCKS = 6
-    NUM_CHANNELS = 128
-    VALUE_HEAD_HIDDEN = 256
-
-    # Dataset
-    DATASET_QUEUE_SIZE = 100000
-
-    # Loss weights
-    VALUE_LOSS_WEIGHT = 1.0
-    POLICY_LOSS_WEIGHT = 1.0
-
-    # Temperature for exploration
-    TEMP_THRESHOLD = 6
-    INITIAL_TEMP = 1.0
-
-    # Data augmentation
-    USE_AUGMENTATION = True
-
-    # Model gating: new model must win >= GATE_WIN_RATE of GATE_GAMES games
-    # against the previous best before replacing it for selfplay data generation.
-    GATE_WIN_RATE = 0.55
-    GATE_GAMES = 20
-    GATE_SIMULATIONS = 200
-    GATE_TEMPERATURE_MOVES = 4  # opening moves sampled proportionally; rest greedy
-
-    # Paths (board-size specific)
-    SAVE_MODEL_PATH = "models_5x5"
-    SAVE_PICKLES = "pickles_5x5"
-    DATASET_PATH = "training_dataset.pkl"
-    BEST_MODEL = "{}_best_model.pt"
-    LOGDIR = "logs_5x5"
-    TEST_OUTPUT_PATH = "test_output_5x5"
-
-    # Evaluation
-    EVAL_GAMES = 40
-    NUM_GAMES = 100
-
-
 class Config9x9Base:
     """Base configuration for 9x9 Go (original scaled up settings)"""
 
@@ -100,32 +30,33 @@ class Config9x9Base:
     PASS_ACTION = 81
     ACTION_SIZE = 82  # 81 positions + 1 pass
 
-    # Komi 
-    KOMI = 6
+    KOMI = 6.5
 
     # Training settings - increased for larger board
     BATCH_SIZE = 512
-    TRAIN_STEPS = 1500  
+    EPOCHS = 20
+    TRAIN_STEPS = 1500
     SELFPLAY_GAMES = 500  # decreased to 500 to match katago
-    LEARNING_RATE = 0.001  # SGD LR
+    LEARNING_RATE = 0.001
     WEIGHT_DECAY = 1e-4
     MOMENTUM = 0.9
     LR_DECAY_ITERS = [30, 60, 200, 400, 700]
     LR_DECAY_FACTOR = 0.1
+    DATA_LOADER_WORKERS = 4   # macOS-friendly; 8 is overkill for 9x9 dataset size
+    NUM_SELFPLAY_WORKERS = 8  # use performance cores; leave efficiency cores free
 
     # MCTS settings
     NUM_SIMULATIONS = 800
     MCTS_UCB_C = 1.414
 
-    # Playout cap randomization
-    # A fraction PLAYOUT_CAP_PROB of moves use the full NUM_SIMULATIONS budget
-    # and generate training data; the rest use FAST_SIMS to advance the game
-    # cheaply without contributing training examples.
-    PLAYOUT_CAP_PROB = 0.25
-    FAST_SIMS        = 100
+    # Playout cap disabled: every move uses full NUM_SIMULATIONS and generates
+    # training data. Fast sims (100) caused 6-move average games via degenerate
+    # pass behavior; full 800-sim search gives ~54-move games.
+    PLAYOUT_CAP_PROB = 1.0
+    FAST_SIMS        = 800
 
     # Network architecture - larger for 9x9
-    NUM_RES_BLOCKS = 10
+    NUM_RES_BLOCKS = 6
     NUM_CHANNELS = 256
     VALUE_HEAD_HIDDEN = 512
 
@@ -263,7 +194,6 @@ class Config19x19Base:
 
 # Select configuration based on board size
 _configs = {
-    5: Config5x5,
     9: Config9x9Base,
     19: Config19x19Base,
 }

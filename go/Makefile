@@ -1,17 +1,30 @@
 # Makefile — build all C/C++ binaries for the Go AlphaZero project
 # Run from the go/ directory.
 
-TORCH := $(shell .venv/bin/python -c "import torch,os; print(os.path.dirname(torch.__file__))")
+PYTHON := $(shell test -x .venv/bin/python && echo .venv/bin/python || echo python3)
+TORCH  := $(shell $(PYTHON) -c "import torch,os; print(os.path.dirname(torch.__file__))")
+UNAME := $(shell uname -s)
 
 CC  = gcc
 CXX = g++
 
 CFLAGS   = -O2 -Wall -I.
+
+ifeq ($(UNAME), Darwin)
+# macOS (Apple Silicon / Intel): no PIE flags, no --no-as-needed (GNU ld only)
+CXXFLAGS = -O2 -std=c++17 -Wall -I. \
+           -I$(TORCH)/include \
+           -I$(TORCH)/include/torch/csrc/api/include
+LDFLAGS  = -L$(TORCH)/lib -Wl,-rpath,$(TORCH)/lib \
+           -ltorch -ltorch_cpu -lc10
+else
+# Linux
 CXXFLAGS = -O2 -std=c++17 -Wall -fno-pie -no-pie -I. \
            -I$(TORCH)/include \
            -I$(TORCH)/include/torch/csrc/api/include
 LDFLAGS  = -L$(TORCH)/lib -Wl,-rpath,$(TORCH)/lib \
            -Wl,--no-as-needed -ltorch -ltorch_cpu -lc10
+endif
 
 # Shared source files
 ENGINE_C = go_engine.c

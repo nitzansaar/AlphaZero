@@ -20,15 +20,17 @@ import pandas as pd
 import argparse
 from profiler import Timer
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+if torch.cuda.is_available():
+    device = "cuda"
+elif torch.backends.mps.is_available():
+    device = "mps"
+else:
+    device = "cpu"
 print(f"Using {device} device")
 
-# RTX 5090 Optimizations
 if device == "cuda":
-    # Enable TensorFloat-32 for faster matrix multiplications on Ampere+ GPUs
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
-    # Enable cuDNN autotuner for optimal convolution algorithms
     torch.backends.cudnn.benchmark = True
 
 
@@ -72,12 +74,6 @@ def _atomic_text_save(text, path):
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
-
-
-def _lr_decay_steps():
-    if hasattr(cfg, "LR_DECAY_STEPS"):
-        return cfg.LR_DECAY_STEPS
-    return [iteration * cfg.TRAIN_STEPS for iteration in cfg.LR_DECAY_ITERS]
 
 
 def _global_step_samples(global_minibatch_step):
@@ -194,13 +190,14 @@ class Trainer:
             }
         return {}
 
-    def _save_training_state(self, iteration, optimizer, scaler, global_minibatch_step):
+    def _save_training_state(self, iteration, optimizer, scaler, scheduler, global_minibatch_step):
         state_path = iteration_training_state_path(cfg.SAVE_MODEL_PATH, iteration)
         _atomic_save_object({
             "iteration": int(iteration),
             "global_minibatch_step": int(global_minibatch_step),
             "optimizer": optimizer.state_dict(),
             "scaler": scaler.state_dict(),
+            "scheduler": scheduler.state_dict(),
         }, state_path)
         print(f"Saved training state: {state_path}")
     def load_data(self):
@@ -255,121 +252,125 @@ class Trainer:
             persistent_workers=cfg.DATA_LOADER_WORKERS > 0,
         )
 
-        # AlphaGo Zero uses MSE for value and cross-entropy for policy
-        # Policy loss: KL divergence between predicted policy and MCTS visit distribution
         value_criterion = nn.MSELoss().to(device)
 
-        # Custom policy loss: cross-entropy with soft targets (MCTS visit distribution)
         def policy_loss_fn(pred_logits, target_probs):
-            """Compute cross-entropy loss with soft targets (probability distribution)"""
             log_probs = torch.nn.functional.log_softmax(pred_logits, dim=1)
-            # Cross-entropy: -sum(target_probs * log(pred_probs))
             loss = -torch.sum(target_probs * log_probs, dim=1).mean()
             return loss
 
         policy_criterion = policy_loss_fn
 
-        # Compute LR from global minibatch count, not coarse checkpoint count.
         current_iter = self.latest_file_number + 1
         global_step = int(self.training_state.get(
             "global_minibatch_step",
             max(self.latest_file_number, 0) * cfg.TRAIN_STEPS,
         ))
-        lr = cfg.LEARNING_RATE
-        for decay_step in _lr_decay_steps():
-            if global_step >= decay_step:
-                lr *= cfg.LR_DECAY_FACTOR
-        print(f"Iteration {current_iter}: global minibatch step={global_step}, using LR={lr:.2e}")
+        print(f"Iteration {current_iter}: global minibatch step={global_step}, LR={cfg.LEARNING_RATE:.2e}")
 
-        # Policy head gets a higher LR (POLICY_LR_MULTIPLIER) to accelerate
-        # policy learning, which lags behind value learning in self-play.
-        policy_modules = [
-            self.original_model.policy_conv,
-            self.original_model.policy_bn,
-            self.original_model.policy_fc,
-        ]
-        policy_params = []
-        for m in policy_modules:
-            policy_params.extend(m.parameters())
-        policy_param_ids = {id(p) for p in policy_params}
-        backbone_params = [p for p in self.original_model.parameters()
-                           if id(p) not in policy_param_ids]
-
-        policy_lr = lr * cfg.POLICY_LR_MULTIPLIER
-        print(f"  Backbone/value LR: {lr:.2e}  |  Policy head LR: {policy_lr:.2e}")
-
-        optimizer = torch.optim.SGD(
-            [
-                {'params': backbone_params},
-                {'params': policy_params, 'lr': policy_lr},
-            ],
-            lr=lr,
-            momentum=cfg.MOMENTUM,
+        optimizer = torch.optim.Adam(
+            self.original_model.parameters(),
+            lr=cfg.LEARNING_RATE,
             weight_decay=cfg.WEIGHT_DECAY,
-            nesterov=True,
         )
         if "optimizer" in self.training_state:
-            optimizer.load_state_dict(self.training_state["optimizer"])
-            for group, group_lr in zip(optimizer.param_groups, [lr, policy_lr]):
-                group["lr"] = group_lr
+            try:
+                optimizer.load_state_dict(self.training_state["optimizer"])
+                for group in optimizer.param_groups:
+                    group["lr"] = cfg.LEARNING_RATE
+            except Exception:
+                print("Could not load optimizer state (incompatible format); starting fresh.")
+
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode='min',
+            factor=0.5,
+            patience=10,
+            threshold=0.0001,
+            threshold_mode='rel',
+            cooldown=5,
+            min_lr=1e-6,
+        )
+        if "scheduler" in self.training_state:
+            try:
+                lr_scheduler.load_state_dict(self.training_state["scheduler"])
+            except Exception:
+                print("Could not load scheduler state; starting fresh.")
 
         amp_enabled = use_mixed_precision and device == "cuda"
-        scaler = GradScaler(device, enabled=amp_enabled)
+        scaler = GradScaler("cuda" if device == "cuda" else "cpu", enabled=amp_enabled)
         if "scaler" in self.training_state:
             scaler.load_state_dict(self.training_state["scaler"])
 
+        best_loss = float('inf')
+        best_state_dict = None
         history = []
 
-        self.model.train()
-        data_iter = iter(train_dataloader)
-        for step in range(cfg.TRAIN_STEPS):
-            try:
-                X, v, p = next(data_iter)
-            except StopIteration:
-                data_iter = iter(train_dataloader)
-                X, v, p = next(data_iter)
+        total_steps = 0
+        for epoch in range(cfg.EPOCHS):
+            self.model.train()
+            train_loss = 0
+            train_vloss = 0
+            train_aloss = 0
 
-            with timer.track("data_transfer"):
-                X = X.to(device, non_blocking=True)
-                v = v.to(device, non_blocking=True)
-                p = p.to(device, non_blocking=True)
+            for X, v, p in train_dataloader:
+                with timer.track("data_transfer"):
+                    X = X.to(device, non_blocking=True)
+                    v = v.to(device, non_blocking=True)
+                    p = p.to(device, non_blocking=True)
 
-            with timer.track("forward_pass"):
-                with autocast(device, enabled=amp_enabled):
-                    yv, yp = self.model(X)
-                    vloss_raw = value_criterion(yv.squeeze(-1), v)
-                    aloss_raw = policy_criterion(yp, p)
-                    # Scale value loss to match policy cross-entropy magnitude
-                    # (~0.5 raw vs ~5.0 raw) so both heads drive the backbone equally.
-                    loss = vloss_raw * cfg.VALUE_LOSS_WEIGHT + aloss_raw * cfg.POLICY_LOSS_WEIGHT
+                with timer.track("forward_pass"):
+                    with autocast(device, enabled=amp_enabled):
+                        yv, yp = self.model(X)
+                        vloss_raw = value_criterion(yv.squeeze(-1), v)
+                        aloss_raw = policy_criterion(yp, p)
+                        loss = vloss_raw * cfg.VALUE_LOSS_WEIGHT + aloss_raw * cfg.POLICY_LOSS_WEIGHT
 
-            with timer.track("backward_pass"):
-                optimizer.zero_grad(set_to_none=True)
-                scaler.scale(loss).backward()
+                train_loss += loss.item()
+                train_vloss += vloss_raw.item()
+                train_aloss += aloss_raw.item()
 
-            with timer.track("optimizer_step"):
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(self.original_model.parameters(), max_norm=1.0)
-                scaler.step(optimizer)
-                scaler.update()
+                with timer.track("backward_pass"):
+                    optimizer.zero_grad(set_to_none=True)
+                    scaler.scale(loss).backward()
 
-            train_loss = loss.item()
-            print(f"Step {step}: Total Loss: {train_loss:.6f}; "
-                  f"Value Loss (raw): {vloss_raw.item():.6f}; "
-                  f"Policy Loss (raw): {aloss_raw.item():.6f}")
-            history.append([step, train_loss, vloss_raw.item(), aloss_raw.item()])
+                with timer.track("optimizer_step"):
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(self.original_model.parameters(), max_norm=1.0)
+                    scaler.step(optimizer)
+                    scaler.update()
 
-        # Always save the model after completing all steps
+                total_steps += 1
+
+            train_loss /= len(train_dataloader)
+            train_vloss /= len(train_dataloader)
+            train_aloss /= len(train_dataloader)
+
+            lr_scheduler.step(train_loss)
+            current_lr = optimizer.param_groups[0]['lr']
+
+            if train_loss < best_loss:
+                best_loss = train_loss
+                best_state_dict = {k: val.cpu().clone() for k, val in self.original_model.state_dict().items()}
+
+            print(f"Epoch {epoch}: Total Loss: {train_loss:.6f}; "
+                  f"Value Loss: {train_vloss:.6f}; "
+                  f"Policy Loss: {train_aloss:.6f}; "
+                  f"LR: {current_lr:.2e}")
+            history.append([epoch, train_loss, train_vloss, train_aloss])
+
         current_iteration = self.latest_file_number + 1
-        global_minibatch_step_after = global_step + cfg.TRAIN_STEPS
+        global_minibatch_step_after = global_step + total_steps
         total_num_data_rows = len(raw_dataset)
         savepath = iteration_model_path(cfg.SAVE_MODEL_PATH, current_iteration)
+        state_to_save = best_state_dict if best_state_dict is not None else self.original_model.state_dict()
         with timer.track("model_save"):
-            _atomic_torch_save(self.original_model.state_dict(), savepath)
+            _atomic_torch_save(state_to_save, savepath)
             self._save_training_state(
                 current_iteration,
                 optimizer,
                 scaler,
+                lr_scheduler,
                 global_minibatch_step_after,
             )
             metadata_path, metadata = _save_model_metadata(
@@ -378,7 +379,7 @@ class Trainer:
                 global_minibatch_step=global_minibatch_step_after,
                 total_num_data_rows=total_num_data_rows,
             )
-        print(f"Saved model: {savepath}")
+        print(f"Saved model (best loss={best_loss:.6f}): {savepath}")
         print(f"Saved model metadata: {metadata_path}")
         print(f"  global_step_samples={metadata['global_step_samples']}  "
               f"total_num_data_rows={metadata['total_num_data_rows']}")
@@ -389,7 +390,7 @@ class Trainer:
         timer.save(timing_path)
         print(f"Timing data saved to {timing_path}")
 
-        history = pd.DataFrame(history, columns=["Step", "Tr_Loss", "Value_Loss", "Policy_Loss"])
+        history = pd.DataFrame(history, columns=["Epoch", "Tr_Loss", "Value_Loss", "Policy_Loss"])
         logpath = os.path.join(cfg.LOGDIR, "{}_history.csv".format(current_iteration))
         history.to_csv(logpath, index=None)
         print(history)

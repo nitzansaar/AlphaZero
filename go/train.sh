@@ -6,7 +6,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-export BOARD_SIZE=19
+export BOARD_SIZE="${BOARD_SIZE:-19}"
 
 if [[ -n "${PYTHON:-}" ]]; then
     PYTHON_BIN="$PYTHON"
