@@ -12,6 +12,10 @@ if device == "cuda":
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     torch.backends.cudnn.benchmark = True
+else:
+    # On a single, often-contended Cloud Run vCPU, oversubscribing the intra-op
+    # threadpool slows per-move MCTS inference and inflates memory. Pin to 1.
+    torch.set_num_threads(1)
 
 class ValuePolicyNetwork:
     def __init__(self, path=None, use_compile=True):

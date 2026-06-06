@@ -14,6 +14,12 @@ from model import NeuralNetwork
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(16))
 
+# Upper bound on MCTS simulations per bot move. Each simulation is a sequential
+# CPU forward pass, so an unbounded value can blow past the gunicorn timeout and
+# starve memory on a small Cloud Run instance.
+MAX_SIMULATIONS = int(os.environ.get("MAX_SIMULATIONS", "800"))
+DEFAULT_SIMULATIONS = 400
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # Global model cache
@@ -116,7 +122,8 @@ def start_game():
     try:
         # Get settings
         human_player = int(request.json.get('human_player', 1))
-        num_simulations = int(request.json.get('num_simulations', 1600))
+        num_simulations = int(request.json.get('num_simulations', DEFAULT_SIMULATIONS))
+        num_simulations = max(1, min(num_simulations, MAX_SIMULATIONS))
 
         # Initialize game components
         game, mcts, policy_value_network = initialize_game()
@@ -170,7 +177,7 @@ def get_state():
         'game_over': game_over,
         'result': result,
         'valid_moves': valid_moves,
-        'num_simulations': session.get('num_simulations', 1600),
+        'num_simulations': session.get('num_simulations', DEFAULT_SIMULATIONS),
         'last_mcts_visit_counts': session.get('last_mcts_visit_counts'),
         'last_mcts_chosen_action_index': session.get('last_mcts_chosen_action_index')
     })
@@ -223,7 +230,8 @@ def bot_move():
 
     state = np.array(session['state'])
     current_player = session['current_player']
-    num_simulations = session['num_simulations']
+    num_simulations = int(session.get('num_simulations', DEFAULT_SIMULATIONS))
+    num_simulations = max(1, min(num_simulations, MAX_SIMULATIONS))
 
     game, mcts, policy_value_network = initialize_game()
 

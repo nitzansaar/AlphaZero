@@ -140,7 +140,7 @@
     <script>
         function startGame() {
             const humanPlayer = parseInt(document.querySelector('input[name="first"]:checked').value);
-            const numSimulations = 1600;
+            const numSimulations = 400;
 
             fetch('/start_game', {
                 method: 'POST',
