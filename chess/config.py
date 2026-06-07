@@ -40,6 +40,7 @@ class Config:
     SELFPLAY_GAMES = 200
     NUM_SIMULATIONS = 400
     MAX_MOVES = 200  # cap full-moves-equivalent plies per self-play game
+    NUM_SELFPLAY_WORKERS = 6  # parallel self-play processes sharing the GPU
 
     # Temperature decay (AlphaGo Zero style)
     TEMP_THRESHOLD = 30  # plies of exploratory play before near-deterministic
