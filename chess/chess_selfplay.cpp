@@ -1,10 +1,14 @@
 /*
  * chess_selfplay.cpp — AlphaZero-style self-play data generator for chess.
  *
- * Produces three .npy files in an output directory:
- *   states.npy    float32 (N, 19, 8, 8)        AlphaZero 19-plane representation
- *   policies.npy  float32 (N, 4672)            MCTS visit-count probabilities
- *   values.npy    float32 (N,)                 game outcome per position
+ * Produces a sparse dataset in an output directory (dense (N,4672) policies are
+ * ~159 MB per 8.5k positions; only ~35 entries per row are nonzero):
+ *   fens.txt            N lines      one FEN per training position
+ *   policy_counts.npy   float32 (N,) nonzero policy entries per position
+ *   policy_indices.npy  float32 (S,) concatenated action indices (cast int in Py)
+ *   policy_probs.npy    float32 (S,) concatenated probabilities
+ *   values.npy          float32 (N,) game outcome from the position's STM view
+ * Planes are recomputed from the FEN in Python (encoding.board_to_planes).
  *
  * Usage:
  *   chess_selfplay <model_ts.pt> [options]
@@ -142,9 +146,38 @@ static bool parse_args(int argc, char *argv[], Config &cfg)
 /* ── One training example ─────────────────────────────────────────────── */
 
 struct Step {
-    float planes[CHESS_NUM_PLANES * 64];
+    std::string fen;                  /* board position (planes recomputed in Python) */
     float probs[CHESS_ACTION_SIZE];
     int   absolute_player;            /* +1 White / -1 Black */
+};
+
+/* ── Self-play outputs (sparse) ───────────────────────────────────────────
+ *
+ * The dataset is stored sparsely to keep both the per-worker temp files and
+ * the merged pickle small: a dense (N,4672) policy array is ~159 MB per 8.5k
+ * positions, but only ~35 entries per row are nonzero.  We emit instead:
+ *   fens.txt         N lines, one FEN per training position
+ *   policy_counts    (N,)        nonzero entries per position
+ *   policy_indices   (sum,)      concatenated action indices  (cast int in Py)
+ *   policy_probs     (sum,)      concatenated probabilities
+ *   values           (N,)        outcome from the position's STM perspective
+ * Planes are recomputed from the FEN on the Python side (encoding.board_to_planes),
+ * which was cross-validated to match the C++ encoding exactly.
+ */
+struct GameOutputs {
+    std::vector<std::string> fens;
+    std::vector<float>       policy_counts;
+    std::vector<float>       policy_indices;
+    std::vector<float>       policy_probs;
+    std::vector<float>       values;
+
+    void append(const GameOutputs &o) {
+        fens.insert(fens.end(), o.fens.begin(), o.fens.end());
+        policy_counts.insert(policy_counts.end(), o.policy_counts.begin(), o.policy_counts.end());
+        policy_indices.insert(policy_indices.end(), o.policy_indices.begin(), o.policy_indices.end());
+        policy_probs.insert(policy_probs.end(), o.policy_probs.begin(), o.policy_probs.end());
+        values.insert(values.end(), o.values.begin(), o.values.end());
+    }
 };
 
 /* ── Result interpretation ────────────────────────────────────────────────
@@ -166,9 +199,7 @@ static int board_winner(const chess::Board &board)
 
 static void play_one_game(NodePool           *pool,
                           const Config       &cfg,
-                          std::vector<float> &out_states,
-                          std::vector<float> &out_policies,
-                          std::vector<float> &out_values,
+                          GameOutputs        &out,
                           std::mt19937       &coin_rng,
                           Timings            &t)
 {
@@ -192,7 +223,7 @@ static void play_one_game(NodePool           *pool,
         step.absolute_player = absolute_player;
 
         auto tp = Clock::now();
-        chess_board_to_planes(board, step.planes);
+        step.fen = board.getFen();   /* planes recomputed from this in Python */
         t.state_copy += Dsec(Clock::now() - tp).count();
 
         auto tm = Clock::now();
@@ -229,18 +260,24 @@ static void play_one_game(NodePool           *pool,
     for (const Step &s : steps) {
         float value = (winner == 0) ? 0.0f
                     : (winner == s.absolute_player) ? 1.0f : -1.0f;
-        out_states.insert(out_states.end(), s.planes, s.planes + CHESS_NUM_PLANES * 64);
-        out_policies.insert(out_policies.end(), s.probs, s.probs + CHESS_ACTION_SIZE);
-        out_values.push_back(value);
+        int cnt = 0;
+        for (int a = 0; a < CHESS_ACTION_SIZE; a++) {
+            if (s.probs[a] > 0.0f) {
+                out.policy_indices.push_back((float)a);
+                out.policy_probs.push_back(s.probs[a]);
+                cnt++;
+            }
+        }
+        out.policy_counts.push_back((float)cnt);
+        out.fens.push_back(s.fen);
+        out.values.push_back(value);
     }
 }
 
 /* ── Worker thread ────────────────────────────────────────────────────── */
 
 static void worker(int thread_id, int num_games, const Config &cfg,
-                   std::vector<float> &shared_states,
-                   std::vector<float> &shared_policies,
-                   std::vector<float> &shared_values,
+                   GameOutputs &shared_out,
                    std::mutex &out_mutex, Timings &shared_timings)
 {
     NNInference nn(cfg.model_path, cfg.use_cuda);
@@ -251,12 +288,11 @@ static void worker(int thread_id, int num_games, const Config &cfg,
 
     NodePool *pool = new NodePool;
 
-    std::vector<float> local_states, local_policies, local_values;
+    GameOutputs local_out;
     Timings local_t;
 
     for (int g = 0; g < num_games; g++) {
-        play_one_game(pool, cfg, local_states, local_policies, local_values,
-                      coin_rng, local_t);
+        play_one_game(pool, cfg, local_out, coin_rng, local_t);
 
         {   /* progress file polled by the Python runner */
             std::string pp = cfg.output_dir + "/progress";
@@ -272,9 +308,7 @@ static void worker(int thread_id, int num_games, const Config &cfg,
     delete pool;
 
     std::lock_guard<std::mutex> lock(out_mutex);
-    shared_states.insert(shared_states.end(), local_states.begin(), local_states.end());
-    shared_policies.insert(shared_policies.end(), local_policies.begin(), local_policies.end());
-    shared_values.insert(shared_values.end(), local_values.begin(), local_values.end());
+    shared_out.append(local_out);
     shared_timings += local_t;
 }
 
@@ -300,13 +334,12 @@ int main(int argc, char *argv[])
     fprintf(stderr, "DirNoise  : alpha=%.4f frac=%.3f\n\n",
             cfg.dirichlet_alpha, cfg.dirichlet_frac);
 
-    std::vector<float> all_states, all_policies, all_values;
+    GameOutputs all_out;
     std::mutex out_mutex;
     Timings all_timings;
 
     if (cfg.num_threads <= 1) {
-        worker(0, cfg.num_games, cfg, all_states, all_policies, all_values,
-               out_mutex, all_timings);
+        worker(0, cfg.num_games, cfg, all_out, out_mutex, all_timings);
     } else {
         int base = cfg.num_games / cfg.num_threads;
         int rem  = cfg.num_games % cfg.num_threads;
@@ -314,36 +347,54 @@ int main(int argc, char *argv[])
         for (int tt = 0; tt < cfg.num_threads; tt++) {
             int n = base + (tt < rem ? 1 : 0);
             threads.emplace_back(worker, tt, n, std::cref(cfg),
-                                 std::ref(all_states), std::ref(all_policies),
-                                 std::ref(all_values), std::ref(out_mutex),
+                                 std::ref(all_out), std::ref(out_mutex),
                                  std::ref(all_timings));
         }
         for (auto &th : threads) th.join();
     }
 
-    int N = (int)all_values.size();
+    int N = (int)all_out.values.size();
     fprintf(stderr, "\nTotal positions: %d\n", N);
 
     {
-        std::string path = cfg.output_dir + "/states.npy";
-        int dims[] = {N, CHESS_NUM_PLANES, 8, 8};
-        if (npy_write_float32(path.c_str(), all_states.data(),
-                              N * CHESS_NUM_PLANES * 64, 4, dims) != 0) {
+        std::string path = cfg.output_dir + "/fens.txt";
+        FILE *fp = fopen(path.c_str(), "w");
+        if (!fp) { fprintf(stderr, "ERROR writing %s\n", path.c_str()); return 1; }
+        int ok = 1;
+        for (const std::string &fen : all_out.fens)
+            ok = ok && (fprintf(fp, "%s\n", fen.c_str()) >= 0);
+        if (fclose(fp) != 0) ok = 0;
+        if (!ok) { remove(path.c_str());
+                   fprintf(stderr, "ERROR writing %s\n", path.c_str()); return 1; }
+        fprintf(stderr, "Wrote: %s\n", path.c_str());
+    }
+    {
+        std::string path = cfg.output_dir + "/policy_counts.npy";
+        int dims[] = {N};
+        if (npy_write_float32(path.c_str(), all_out.policy_counts.data(), N, 1, dims) != 0) {
             fprintf(stderr, "ERROR writing %s\n", path.c_str()); return 1; }
         fprintf(stderr, "Wrote: %s\n", path.c_str());
     }
     {
-        std::string path = cfg.output_dir + "/policies.npy";
-        int dims[] = {N, CHESS_ACTION_SIZE};
-        if (npy_write_float32(path.c_str(), all_policies.data(),
-                              N * CHESS_ACTION_SIZE, 2, dims) != 0) {
+        std::string path = cfg.output_dir + "/policy_indices.npy";
+        int nnz = (int)all_out.policy_indices.size();
+        int dims[] = {nnz};
+        if (npy_write_float32(path.c_str(), all_out.policy_indices.data(), nnz, 1, dims) != 0) {
+            fprintf(stderr, "ERROR writing %s\n", path.c_str()); return 1; }
+        fprintf(stderr, "Wrote: %s\n", path.c_str());
+    }
+    {
+        std::string path = cfg.output_dir + "/policy_probs.npy";
+        int nnz = (int)all_out.policy_probs.size();
+        int dims[] = {nnz};
+        if (npy_write_float32(path.c_str(), all_out.policy_probs.data(), nnz, 1, dims) != 0) {
             fprintf(stderr, "ERROR writing %s\n", path.c_str()); return 1; }
         fprintf(stderr, "Wrote: %s\n", path.c_str());
     }
     {
         std::string path = cfg.output_dir + "/values.npy";
         int dims[] = {N};
-        if (npy_write_float32(path.c_str(), all_values.data(), N, 1, dims) != 0) {
+        if (npy_write_float32(path.c_str(), all_out.values.data(), N, 1, dims) != 0) {
             fprintf(stderr, "ERROR writing %s\n", path.c_str()); return 1; }
         fprintf(stderr, "Wrote: %s\n", path.c_str());
     }

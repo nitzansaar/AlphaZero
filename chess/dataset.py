@@ -83,25 +83,40 @@ class TrainingDataset:
         self.training_dataset = self.training_dataset[-cfg.DATASET_QUEUE_SIZE:]
 
     def load_from_npy(self, npy_dir):
-        """Append dense positions written by chess_selfplay (states/policies/values).
+        """Append sparse positions written by chess_selfplay.
 
-        Stored as [planes(19,8,8), policy(4672), 0, value]; the value is already
-        from the position's side-to-move perspective, so the player slot is an
-        unused 0 sentinel.
+        The C++ binary emits a compact representation (a dense (N,4672) policy
+        is ~159 MB per 8.5k positions; only ~35 entries per row are nonzero):
+            fens.txt            N lines, one FEN per position
+            policy_counts.npy   (N,)  nonzero policy entries per position
+            policy_indices.npy  (S,)  concatenated action indices
+            policy_probs.npy    (S,)  concatenated probabilities
+            values.npy          (N,)  outcome from the position's STM view
+
+        Stored as [fen, (indices, probs), player, value] — the legacy sparse
+        format, so ChessDataset.__getitem__ recomputes the planes from the FEN.
+        The value is already from the position's side-to-move perspective.
         """
-        states = np.load(os.path.join(npy_dir, "states.npy"))
-        policies = np.load(os.path.join(npy_dir, "policies.npy"))
+        with open(os.path.join(npy_dir, "fens.txt")) as f:
+            fens = f.read().splitlines()
+        counts = np.load(os.path.join(npy_dir, "policy_counts.npy")).astype(np.int64)
+        indices = np.load(os.path.join(npy_dir, "policy_indices.npy")).astype(np.int64)
+        probs = np.load(os.path.join(npy_dir, "policy_probs.npy")).astype(np.float32)
         values = np.load(os.path.join(npy_dir, "values.npy"))
 
-        assert states.shape[1:] == (cfg.NUM_INPUT_PLANES, 8, 8), \
-            f"unexpected states shape {states.shape}"
-        assert policies.shape[1] == cfg.ACTION_SIZE, \
-            f"unexpected policies shape {policies.shape}"
-        assert len(states) == len(policies) == len(values), "ragged npy lengths"
+        assert len(fens) == len(counts) == len(values), "ragged npy lengths"
+        assert int(counts.sum()) == len(indices) == len(probs), \
+            "policy_counts does not match indices/probs length"
 
+        off = 0
         for i in range(len(values)):
+            c = int(counts[i])
+            idx = indices[off:off + c]
+            pr = probs[off:off + c]
+            off += c
+            player = 1 if chess.Board(fens[i]).turn == chess.WHITE else -1
             self.training_dataset.append(
-                [states[i], policies[i], 0, float(values[i])]
+                [fens[i], (idx, pr), player, float(values[i])]
             )
         self.training_dataset = self.training_dataset[-cfg.DATASET_QUEUE_SIZE:]
 
