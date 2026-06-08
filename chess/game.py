@@ -38,11 +38,14 @@ class ChessGame:
         return self.apply_move(board, move)
 
     def is_terminal(self, board):
-        return board.is_game_over(claim_draw=True)
+        # claim_draw=False: boards are copied with stack=False (no move history),
+        # so claimable draws (threefold / fifty-move) can't be detected anyway,
+        # and claim_draw=True's repetition scan was a large, wasted cost.
+        return board.is_game_over(claim_draw=False)
 
     def get_result(self, board):
         """+1 White win, -1 Black win, 0 draw. Assumes terminal board."""
-        result = board.result(claim_draw=True)
+        result = board.result(claim_draw=False)
         if result == "1-0":
             return 1
         if result == "0-1":

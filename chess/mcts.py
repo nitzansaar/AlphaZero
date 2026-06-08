@@ -16,7 +16,7 @@ from config import Config as cfg
 
 class Node:
     def __init__(self, board, player, prior_prob, parent=None, action_index=None):
-        self.board = board            # chess.Board at this node
+        self.board = board            # chess.Board at this node (may be None until visited)
         self.player = player          # +1 if White to move here, -1 if Black
         self.prior_probs_P = prior_prob
         self.total_visits_N = 0
@@ -25,19 +25,34 @@ class Node:
         self.children = {}            # action_index -> Node
         self.parent = parent
         self.action_index = action_index
+        self.move = None              # move from parent that leads here (for lazy board)
 
     def is_leaf_node(self):
         return len(self.children) == 0
 
     def expand(self, action_probs, game):
-        """Create one child per legal move with its prior probability."""
+        """Create one child per legal move with its prior probability.
+
+        Child boards are NOT materialized here. Building a chess.Board for every
+        legal move (board.copy + push) dominates self-play cost, yet most
+        children are never visited. We store only the move and create the board
+        lazily on first visit via ensure_board().
+        """
         child_player = -self.player
         for action_index, move in game.legal_move_index_map(self.board).items():
-            child_board = game.apply_move(self.board, move)
-            self.children[action_index] = Node(
-                child_board, child_player, action_probs[action_index],
+            child = Node(
+                None, child_player, action_probs[action_index],
                 parent=self, action_index=action_index,
             )
+            child.move = move
+            self.children[action_index] = child
+
+    def ensure_board(self, game):
+        """Materialize this node's board from its parent the first time it is
+        visited. Internal (already-expanded) nodes always have a board."""
+        if self.board is None:
+            self.board = game.apply_move(self.parent.board, self.move)
+        return self.board
 
     def select_best_child(self):
         best_score = float("-inf")
@@ -109,6 +124,7 @@ class MonteCarloTreeSearch:
                 path.append(node)
 
             leaf = node
+            leaf.ensure_board(self.game)
             if self.game.is_terminal(leaf.board):
                 # Result is from White's perspective; convert to leaf mover view.
                 result = self.game.get_result(leaf.board)
