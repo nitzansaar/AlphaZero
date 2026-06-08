@@ -9,6 +9,31 @@ export CUDNN_BENCHMARK=1
 
 cd "$(dirname "$0")" || exit
 
+# Resolve the Python that has torch (project .venv lives one level up).
+if [ -x ../.venv/bin/python ]; then
+    PY=../.venv/bin/python
+elif [ -x .venv/bin/python ]; then
+    PY=.venv/bin/python
+else
+    PY=python3
+fi
+
+# Build (or rebuild) the C++ self-play backend before the loop.
+echo "Building C++ self-play backend..."
+if ! make all; then
+    echo "Error: failed to build chess_selfplay (make all)"
+    exit 1
+fi
+
+# Cold start: the C++ self-play loads a checkpoint, so ensure an initial random
+# model exists (mirrors selfplay.py bootstrapping with a random network).
+if ! ls output_chess/models/*_best_model.pt >/dev/null 2>&1; then
+    echo "No checkpoint found — creating an initial random model..."
+    $PY -c "import os, torch; from model import NeuralNetwork; \
+os.makedirs('output_chess/models', exist_ok=True); \
+torch.save(NeuralNetwork().state_dict(), 'output_chess/models/0_best_model.pt')" || exit 1
+fi
+
 NUM_ITERATIONS=${1:-10}
 
 if ! [[ "$NUM_ITERATIONS" =~ ^[0-9]+$ ]] || [ "$NUM_ITERATIONS" -lt 1 ]; then
@@ -41,9 +66,10 @@ for iteration in $(seq 1 "$NUM_ITERATIONS"); do
     echo "Started at: $ITER_START_ISO"
     echo "============================================"
 
-    echo "Phase 1/2: Generating self-play games..."
+    echo "Phase 1/2: Generating self-play games (C++ backend)..."
     SELFPLAY_START=$(date +%s)
-    python3 selfplay.py
+    # Pure-Python fallback (slow): replace the line below with: $PY selfplay.py
+    $PY selfplay_cpp_runner.py
     if [ $? -ne 0 ]; then
         echo "Error: Self-play failed at iteration $iteration"
         exit 1
@@ -54,7 +80,7 @@ for iteration in $(seq 1 "$NUM_ITERATIONS"); do
     echo ""
     echo "Phase 2/2: Training neural network..."
     TRAINING_START=$(date +%s)
-    python3 train.py
+    $PY train.py
     if [ $? -ne 0 ]; then
         echo "Error: Training failed at iteration $iteration"
         exit 1

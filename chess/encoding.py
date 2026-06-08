@@ -187,8 +187,11 @@ def board_to_planes(board):
     if canonical.has_queenside_castling_rights(chess.BLACK):
         planes[16, :, :] = 1.0
 
-    # Plane 17: en-passant target square.
-    if canonical.ep_square is not None:
+    # Plane 17: en-passant target square. Only marked when the capture is
+    # actually legal, matching the C++ engine (Disservin chess-library), which
+    # records an en-passant square only when it is capturable. This keeps the
+    # Python tooling consistent with C++-generated training data.
+    if canonical.ep_square is not None and canonical.has_legal_en_passant():
         planes[17, chess.square_rank(canonical.ep_square),
                chess.square_file(canonical.ep_square)] = 1.0
 
