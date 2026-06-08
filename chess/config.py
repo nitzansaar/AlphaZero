@@ -40,20 +40,7 @@ class Config:
     SELFPLAY_GAMES = 200
     NUM_SIMULATIONS = 400
     MAX_MOVES = 200  # cap full-moves-equivalent plies per self-play game
-
-    # Batched self-play: this many games run concurrently in one process so each
-    # MCTS step is served by a single batched NN forward pass (batch size up to
-    # NUM_PARALLEL_GAMES) instead of one batch-1 call per game.
-    NUM_PARALLEL_GAMES = 64
-
-    # Resignation: abandon a game once the side to move is clearly lost, instead
-    # of playing it out to MAX_MOVES. RESIGN_THRESHOLD is on the root value
-    # (mover's perspective, in [-1, 1]); it must hold for RESIGN_CONSECUTIVE
-    # moves in a row. A RESIGN_PLAYTHROUGH_FRAC fraction of games never resign so
-    # the data still contains some full games (guards against bad early values).
-    RESIGN_THRESHOLD = -0.90
-    RESIGN_CONSECUTIVE = 4
-    RESIGN_PLAYTHROUGH_FRAC = 0.1
+    NUM_SELFPLAY_WORKERS = 6  # parallel self-play processes sharing the GPU
 
     # Temperature decay (AlphaGo Zero style)
     TEMP_THRESHOLD = 30  # plies of exploratory play before near-deterministic

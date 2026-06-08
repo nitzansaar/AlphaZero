@@ -1,4 +1,6 @@
 import os
+import time
+import multiprocessing as mp
 from glob import glob
 
 import numpy as np
@@ -61,166 +63,68 @@ def play_game(game, mcts):
     return records, winner
 
 
-# ----------------------------------------------------------------------------
-# Batched self-play
-# ----------------------------------------------------------------------------
-# Many games run concurrently in one process. Each game is a generator (a
-# coroutine) that yields a board whenever its MCTS needs an evaluation and is
-# sent back (value, policy). A driver gathers the boards yielded by every active
-# game, runs ONE batched forward pass, and sends each result back — turning
-# thousands of batch-1 calls into a few batched calls per step. The MCTS math is
-# identical to play_game / run_simulation; only *when* inference happens changes.
+# Per-process worker state, populated once by the Pool initializer so each worker
+# builds its model exactly once (not per game).
+_WORKER = {}
 
 
-def play_game_coro(mcts, game, allow_resign):
-    """Generator self-play game.
+def _init_worker(model_path, base_seed):
+    """Pool initializer: give this process its own RNG, model, and MCTS."""
+    # Distinct numpy RNG per process. MCTS randomness (Dirichlet noise and move
+    # sampling) uses numpy's global RNG (mcts.py:79,142); without distinct seeds
+    # workers would produce correlated/identical games and waste the parallelism.
+    seed = (base_seed + os.getpid()) % (2 ** 31)
+    np.random.seed(seed)
 
-    Yields a chess.Board each time an evaluation is needed; the driver sends
-    back (value, policy). Returns (records, winner) via StopIteration.value.
-    """
-    board = game.get_initial_board()
-    root = mcts.make_root(board)
-
-    records = []
-    move_count = 0
-    resign_streak = 0
-    winner = None
-
-    while not game.is_terminal(board) and move_count < cfg.MAX_MOVES:
-        # Expand the root the first time it is used.
-        if root.is_leaf_node() and not game.is_terminal(root.board):
-            _, probs = yield root.board
-            root.expand(probs, game)
-
-        mcts._add_dirichlet_noise(root)
-
-        for _ in range(cfg.NUM_SIMULATIONS):
-            path = [root]
-            node = root
-            while not node.is_leaf_node():
-                _, node = node.select_best_child()
-                path.append(node)
-
-            leaf = node
-            if game.is_terminal(leaf.board):
-                result = game.get_result(leaf.board)
-                leaf_value = result * leaf.player
-            else:
-                value, probs = yield leaf.board
-                leaf.expand(probs, game)
-                leaf_value = value
-
-            mcts.backup(path, leaf_value, leaf.player)
-
-        temperature = cfg.INITIAL_TEMP if move_count < cfg.TEMP_THRESHOLD else cfg.FINAL_TEMP
-        _, child, action_probs = mcts.select_move(root, temperature=temperature)
-
-        records.append([board.fen(), sparse_policy(action_probs), root.player])
-
-        # Resignation: root.mean_action_value_Q is the searched value from the
-        # side-to-move's perspective. If it stays very negative, abandon the game.
-        if allow_resign:
-            if root.mean_action_value_Q < cfg.RESIGN_THRESHOLD:
-                resign_streak += 1
-            else:
-                resign_streak = 0
-            if resign_streak >= cfg.RESIGN_CONSECUTIVE:
-                winner = -root.player  # side to move resigns; opponent wins
-                break
-
-        # Advance: the chosen child becomes the new root.
-        board = child.board
-        child.parent = None
-        root = child
-        move_count += 1
-
-    if winner is None:
-        if game.is_terminal(board):
-            winner = game.get_result(board)  # +1 White, -1 Black, 0 draw
-        else:
-            winner = 0  # hit the move cap -> treat as a draw
-
-    return records, winner
+    game = ChessGame()
+    if model_path is not None:
+        vpn = ValuePolicyNetwork(path=model_path)
+    else:
+        vpn = ValuePolicyNetwork(path=None)
+    _WORKER["game"] = game
+    _WORKER["mcts"] = MonteCarloTreeSearch(game, vpn.get_vp)
 
 
-def run_batched_selfplay(vpn, game, num_games, num_parallel):
-    """Play num_games via num_parallel concurrent coroutines, batching every
-    evaluation step into one forward pass. Yields (records, winner) as each
-    game finishes."""
-    mcts = MonteCarloTreeSearch(game, None)  # network is reached via yield, not this
-
-    def new_coro():
-        # A fraction of games never resign (calibration / full-game data).
-        allow_resign = np.random.random() >= cfg.RESIGN_PLAYTHROUGH_FRAC
-        coro = play_game_coro(mcts, game, allow_resign)
-        board = coro.send(None)  # prime: advance to first eval request
-        return coro, board
-
-    num_parallel = max(1, min(num_parallel, num_games))
-    started = 0
-    coros = []        # active coroutines
-    boards = []       # board each active coroutine is currently waiting on
-
-    for _ in range(num_parallel):
-        if started >= num_games:
-            break
-        coro, board = new_coro()
-        coros.append(coro)
-        boards.append(board)
-        started += 1
-
-    while coros:
-        # One batched forward pass for every active game's pending board.
-        # Pad to num_parallel so the input shape stays constant (keeps the
-        # torch.compile CUDA-graph capture reusable across steps).
-        results = vpn.get_vp_batch(boards, pad_to=num_parallel)
-
-        next_coros = []
-        next_boards = []
-        for coro, result in zip(coros, results):
-            try:
-                board = coro.send(result)
-                next_coros.append(coro)
-                next_boards.append(board)
-            except StopIteration as stop:
-                yield stop.value  # (records, winner)
-                if started < num_games:
-                    ncoro, nboard = new_coro()
-                    next_coros.append(ncoro)
-                    next_boards.append(nboard)
-                    started += 1
-
-        coros = next_coros
-        boards = next_boards
+def _play_one(_idx):
+    """Pool task: play one self-play game using this worker's model/MCTS."""
+    return play_game(_WORKER["game"], _WORKER["mcts"])
 
 
 def main():
     os.makedirs(cfg.SAVE_PICKLES, exist_ok=True)
     save_path = os.path.join(cfg.SAVE_PICKLES, cfg.DATASET_PATH)
 
-    game = ChessGame()
-
+    # Resolve the checkpoint in the parent (which never builds a model, so it
+    # holds no extra CUDA context); workers load it themselves.
     model_path, latest = find_latest_model()
     if model_path is not None:
         print(f"Loading trained model: {model_path}")
-        vpn = ValuePolicyNetwork(path=model_path)
     else:
         print("No trained model found. Bootstrapping self-play with a random network.")
-        vpn = ValuePolicyNetwork(path=None)
 
     training_dataset = TrainingDataset()
     num_games = cfg.SELFPLAY_GAMES
-    num_parallel = cfg.NUM_PARALLEL_GAMES
+    num_workers = max(1, min(cfg.NUM_SELFPLAY_WORKERS, num_games))
+    base_seed = int(time.time())
 
-    print(f"Self-play: {num_games} games, {num_parallel} concurrent (batched inference).")
+    print(f"Self-play: {num_games} games across {num_workers} worker process(es).")
 
-    completed = run_batched_selfplay(vpn, game, num_games, num_parallel)
-    for game_number, (records, winner) in enumerate(tqdm(completed, total=num_games)):
-        training_dataset.add_game_to_training_dataset(records, winner)
+    # spawn is required for CUDA in subprocesses.
+    ctx = mp.get_context("spawn")
+    with ctx.Pool(
+        num_workers,
+        initializer=_init_worker,
+        initargs=(model_path, base_seed),
+    ) as pool:
+        results = pool.imap_unordered(_play_one, range(num_games))
+        for game_number, (records, winner) in enumerate(
+            tqdm(results, total=num_games)
+        ):
+            training_dataset.add_game_to_training_dataset(records, winner)
 
-        if game_number % 50 == 0:
-            training_dataset.save(save_path)
-            print(f"saving.... game {game_number}, samples={len(training_dataset.training_dataset)}")
+            if game_number % 50 == 0:
+                training_dataset.save(save_path)
+                print(f"saving.... game {game_number}, samples={len(training_dataset.training_dataset)}")
 
     training_dataset.save(save_path)
     print(f"Self-play complete. Total samples: {len(training_dataset.training_dataset)}")
