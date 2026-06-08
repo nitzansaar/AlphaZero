@@ -1,6 +1,4 @@
 import os
-import time
-import multiprocessing as mp
 from glob import glob
 
 import numpy as np
@@ -63,68 +61,32 @@ def play_game(game, mcts):
     return records, winner
 
 
-# Per-process worker state, populated once by the Pool initializer so each worker
-# builds its model exactly once (not per game).
-_WORKER = {}
-
-
-def _init_worker(model_path, base_seed):
-    """Pool initializer: give this process its own RNG, model, and MCTS."""
-    # Distinct numpy RNG per process. MCTS randomness (Dirichlet noise and move
-    # sampling) uses numpy's global RNG (mcts.py:79,142); without distinct seeds
-    # workers would produce correlated/identical games and waste the parallelism.
-    seed = (base_seed + os.getpid()) % (2 ** 31)
-    np.random.seed(seed)
-
-    game = ChessGame()
-    if model_path is not None:
-        vpn = ValuePolicyNetwork(path=model_path)
-    else:
-        vpn = ValuePolicyNetwork(path=None)
-    _WORKER["game"] = game
-    _WORKER["mcts"] = MonteCarloTreeSearch(game, vpn.get_vp)
-
-
-def _play_one(_idx):
-    """Pool task: play one self-play game using this worker's model/MCTS."""
-    return play_game(_WORKER["game"], _WORKER["mcts"])
-
-
 def main():
     os.makedirs(cfg.SAVE_PICKLES, exist_ok=True)
     save_path = os.path.join(cfg.SAVE_PICKLES, cfg.DATASET_PATH)
 
-    # Resolve the checkpoint in the parent (which never builds a model, so it
-    # holds no extra CUDA context); workers load it themselves.
+    game = ChessGame()
+
     model_path, latest = find_latest_model()
     if model_path is not None:
         print(f"Loading trained model: {model_path}")
+        vpn = ValuePolicyNetwork(path=model_path)
     else:
         print("No trained model found. Bootstrapping self-play with a random network.")
+        vpn = ValuePolicyNetwork(path=None)
+
+    mcts = MonteCarloTreeSearch(game, vpn.get_vp)
 
     training_dataset = TrainingDataset()
     num_games = cfg.SELFPLAY_GAMES
-    num_workers = max(1, min(cfg.NUM_SELFPLAY_WORKERS, num_games))
-    base_seed = int(time.time())
 
-    print(f"Self-play: {num_games} games across {num_workers} worker process(es).")
+    for game_number in tqdm(range(num_games), total=num_games):
+        records, winner = play_game(game, mcts)
+        training_dataset.add_game_to_training_dataset(records, winner)
 
-    # spawn is required for CUDA in subprocesses.
-    ctx = mp.get_context("spawn")
-    with ctx.Pool(
-        num_workers,
-        initializer=_init_worker,
-        initargs=(model_path, base_seed),
-    ) as pool:
-        results = pool.imap_unordered(_play_one, range(num_games))
-        for game_number, (records, winner) in enumerate(
-            tqdm(results, total=num_games)
-        ):
-            training_dataset.add_game_to_training_dataset(records, winner)
-
-            if game_number % 50 == 0:
-                training_dataset.save(save_path)
-                print(f"saving.... game {game_number}, samples={len(training_dataset.training_dataset)}")
+        if game_number % 50 == 0:
+            training_dataset.save(save_path)
+            print(f"saving.... game {game_number}, samples={len(training_dataset.training_dataset)}")
 
     training_dataset.save(save_path)
     print(f"Self-play complete. Total samples: {len(training_dataset.training_dataset)}")
