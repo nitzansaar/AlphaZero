@@ -48,6 +48,7 @@ def play_game(game, mcts):
         records.append([board.fen(), sparse_policy(action_probs), root.player])
 
         # Advance: the chosen child becomes the new root.
+        child.ensure_board(game)
         board = child.board
         child.parent = None
         root = child
@@ -102,6 +103,7 @@ def play_game_coro(mcts, game, allow_resign):
                 path.append(node)
 
             leaf = node
+            leaf.ensure_board(game)
             if game.is_terminal(leaf.board):
                 result = game.get_result(leaf.board)
                 leaf_value = result * leaf.player
@@ -128,7 +130,9 @@ def play_game_coro(mcts, game, allow_resign):
                 winner = -root.player  # side to move resigns; opponent wins
                 break
 
-        # Advance: the chosen child becomes the new root.
+        # Advance: the chosen child becomes the new root (materialize its board
+        # before detaching it from its parent).
+        child.ensure_board(game)
         board = child.board
         child.parent = None
         root = child
