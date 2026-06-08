@@ -142,8 +142,15 @@ def main():
     print(f"\nRunning {cfg.SELFPLAY_GAMES} games across {effective_workers} workers "
           f"({'GPU' if USE_CUDA else 'CPU'}), {cfg.NUM_SIMULATIONS} sims/move:\n")
 
+    # Workers write large .npy files (the 200-game policies array is ~160 MB
+    # per worker).  Keep the temp dir on the same disk-backed filesystem as the
+    # dataset rather than the default /tmp, which is often a small tmpfs and
+    # would truncate the writes.
+    tmp_parent = cfg.SAVE_PICKLES
+    os.makedirs(tmp_parent, exist_ok=True)
+
     agg_timings, agg_metrics = {}, {}
-    with tempfile.TemporaryDirectory(prefix="chess_selfplay_") as tmp_dir:
+    with tempfile.TemporaryDirectory(prefix="chess_selfplay_", dir=tmp_parent) as tmp_dir:
         procs, worker_dirs, log_files, games_list = [], [], [], []
         for i in range(effective_workers):
             games = games_per_worker + (1 if i < remainder else 0)

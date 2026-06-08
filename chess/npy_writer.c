@@ -70,20 +70,29 @@ int npy_write_float32(const char  *path,
     memset(header + dict_len, ' ', (size_t)pad);
     header[dict_len + pad] = '\n';   /* terminates at index header_len-1 */
 
-    /* ── Write file ────────────────────────────────────────────────────── */
+    /* ── Write file ──────────────────────────────────────────────────────
+     * Every fwrite is checked: a short write (e.g. the filesystem ran out of
+     * space) must surface as an error rather than a silently truncated file. */
     FILE *fp = fopen(path, "wb");
     if (!fp) { free(header); return -1; }
 
-    fwrite(NPY_PREFIX, 1, 8, fp);
+    int ok = 1;
+    ok = ok && (fwrite(NPY_PREFIX, 1, 8, fp) == 8);
 
     uint16_t hl = (uint16_t)header_len;
-    fwrite(&hl, 2, 1, fp);
+    ok = ok && (fwrite(&hl, 2, 1, fp) == 1);
 
-    fwrite(header, 1, (size_t)header_len, fp);
+    ok = ok && (fwrite(header, 1, (size_t)header_len, fp) == (size_t)header_len);
 
-    fwrite(data, sizeof(float), (size_t)n_elem, fp);
+    ok = ok && (fwrite(data, sizeof(float), (size_t)n_elem, fp) == (size_t)n_elem);
 
-    fclose(fp);
+    /* fclose can fail too (buffered data flushed here). */
+    if (fclose(fp) != 0) ok = 0;
     free(header);
+
+    if (!ok) {
+        remove(path);   /* don't leave a corrupt/partial file behind */
+        return -1;
+    }
     return 0;
 }
