@@ -174,7 +174,18 @@ class Trainer:
                 savepath = os.path.join(
                     cfg.SAVE_MODEL_PATH, cfg.BEST_MODEL.format(current_iteration)
                 )
-                torch.save(self.original_model.state_dict(), savepath)
+                # Atomic save: write to a temp file then rename, so a failed
+                # write (e.g. disk full) can't truncate/corrupt an existing good
+                # checkpoint.  torch.save truncates its target before writing, so
+                # writing in place would destroy the previous model on failure.
+                tmppath = savepath + ".tmp"
+                try:
+                    torch.save(self.original_model.state_dict(), tmppath)
+                    os.replace(tmppath, savepath)
+                except Exception:
+                    if os.path.exists(tmppath):
+                        os.remove(tmppath)
+                    raise
                 print(f"Saving Model.....BL {savepath}")
                 self.current_iteration = current_iteration
 
